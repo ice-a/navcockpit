@@ -15,8 +15,11 @@ function buildEndpointCandidates(baseURL) {
 }
 
 export async function resolveAiConfig(explicit) {
-  if (explicit && explicit.baseUrl && explicit.apiKey) {
-    return { baseUrl: explicit.baseUrl, apiKey: explicit.apiKey, model: explicit.model || 'gpt-4o-mini' };
+  // 兼容 baseUrl / baseURL 两种键名（前端 useSettings 存的是 baseURL）
+  const eBase = explicit && (explicit.baseURL || explicit.baseUrl);
+  const eKey = explicit && explicit.apiKey;
+  if (eBase && eKey) {
+    return { baseUrl: eBase, apiKey: eKey, model: explicit.model || 'gpt-4o-mini' };
   }
   // MongoDB 里的全局 AI 配置（可选）
   if (process.env.MONGODB_URI) {

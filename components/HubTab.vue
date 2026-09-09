@@ -16,7 +16,7 @@ const SECTIONS = [
   { id: 'tools', label: '🧰 工具' },
   { id: 'skills', label: '🧩 Skills' },
   { id: 'vpns', label: '🔒 VPN' },
-  { id: 'servers', label: '🖥 服务器' },
+  { id: 'servers', label: '⚡ AI 直连平台' },
   { id: 'tutorials', label: '📚 教程' },
 ];
 
@@ -53,11 +53,11 @@ const FIELDS = {
     { key: 'sort', label: '排序', type: 'number' },
   ],
   servers: [
-    { key: 'name', label: '名称', required: true },
-    { key: 'category', label: '分类（如：国内 / 国际）' },
-    { key: 'url', label: '地址' },
+    { key: 'name', label: '平台名称', required: true },
+    { key: 'category', label: '分类（官方 / 国内 / 国际）' },
+    { key: 'url', label: '接入地址' },
     { key: 'region', label: '区域' },
-    { key: 'desc', label: '描述' },
+    { key: 'desc', label: '说明' },
     { key: 'sort', label: '排序', type: 'number' },
   ],
   tutorials: [
@@ -87,6 +87,76 @@ const detailLoading = ref(false);
 
 const aiLoading = ref('');
 const aiOutput = ref('');
+
+// ===== AI 辅助录入（仅后台：所有 /api/ai/* 与 /api/tools/summarize 均需管理密码） =====
+const aiBusy = ref(false);
+function aiCfg() {
+  return settings.aiConfig.baseURL
+    ? { baseURL: settings.aiConfig.baseURL, apiKey: settings.aiConfig.apiKey, model: settings.aiConfig.model }
+    : undefined;
+}
+// 按当前表单生成内容并回填（工具/Skills/VPN/AI直连平台/教程）
+async function aiFill() {
+  const { coll } = editing.value;
+  aiBusy.value = true;
+  error.value = '';
+  try {
+    const res = await fetch('/api/ai/assist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({ coll, fields: { ...form.value }, config: aiCfg() }),
+    });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
+    for (const [k, v] of Object.entries(b)) {
+      if (v === undefined || v === null) continue;
+      if (k === 'tags') form.value.tags = Array.isArray(v) ? v.join('，') : v;
+      else if (k === 'detail') form.value.detail = Array.isArray(v) ? v.join('\n') : v;
+      else form.value[k] = v;
+    }
+    toast('AI 已生成并回填，检查后保存', 'success');
+  } catch (e) {
+    error.value = `AI 生成失败：${e.message}`;
+  } finally {
+    aiBusy.value = false;
+  }
+}
+// 教程编辑器内：润色 / 续写 / 生成摘要
+async function aiWrite(action) {
+  aiBusy.value = true;
+  error.value = '';
+  try {
+    const res = await fetch('/api/tools/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({ content: form.value.content || '', mode: action, config: aiCfg() }),
+    });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
+    if (action === 'summary') {
+      form.value.summary = (b.text || '').trim();
+      toast('摘要已生成并回填', 'success');
+    } else if (action === 'polish') {
+      form.value.content = b.text;
+      toast('润色完成', 'success');
+    } else {
+      form.value.content = `${(form.value.content || '').replace(/\s*$/, '')}\n\n${b.text}`;
+      toast('已续写并追加到正文末尾', 'success');
+    }
+  } catch (e) {
+    error.value = `AI 操作失败：${e.message}`;
+  } finally {
+    aiBusy.value = false;
+  }
+}
+// 教程 Markdown 实时预览
+const previewHtml = computed(() => {
+  try {
+    return marked.parse(form.value.content || '');
+  } catch {
+    return '';
+  }
+});
 
 const currentList = computed(() => lists.value[activeSection.value] || []);
 const adminHeaders = () => ({ 'x-admin-password': sessionStorage.getItem('admin_pwd') || '' });
@@ -136,13 +206,20 @@ function logout() {
 }
 
 function openCreate() {
-  form.value = { status: 'active', sort: 0 };
+  form.value = { status: activeSection.value === 'tutorials' ? 'published' : 'active', sort: 0 };
   editing.value = { coll: activeSection.value, doc: null };
 }
 
-function openEdit(item) {
+async function openEdit(item) {
   form.value = { ...item };
   editing.value = { coll: activeSection.value, doc: item };
+  // 教程列表接口不带正文，编辑前先拉全文，避免保存时把正文覆盖为空
+  if (activeSection.value === 'tutorials') {
+    try {
+      const res = await fetch(`/api/hub/tutorials/${item._id}`);
+      if (res.ok) form.value.content = (await res.json()).content || '';
+    } catch {}
+  }
 }
 
 async function saveEdit() {
@@ -232,7 +309,7 @@ async function aiAction(mode) {
   try {
     const res = await fetch('/api/tools/summarize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
       body: JSON.stringify({
         content: detail.value.content || detail.value.summary,
         mode,
@@ -384,9 +461,59 @@ onMounted(loadAll);
     <div v-if="loading" class="loading">正在从 MongoDB 读取…</div>
     <div v-else-if="!currentList.length" class="empty">暂无数据{{ adminMode ? '，点右上角「新增」创建' : '' }}</div>
 
-    <!-- 通用编辑弹窗 -->
+    <!-- 通用编辑弹窗：教程 = 宽幅 Markdown 编辑器，其余 = 普通表单 -->
     <div v-if="editing" class="modal-mask" @click.self="editing = null">
-      <div class="modal">
+      <!-- 教程：左写右预览 + AI 辅助写作 -->
+      <div v-if="editing.coll === 'tutorials'" class="modal wide">
+        <h3>{{ editing.doc ? '编辑' : '新增' }}教程</h3>
+        <div class="field-row">
+          <label>标题 *</label>
+          <input v-model="form.title" type="text" placeholder="教程标题" />
+        </div>
+        <div class="field-row3">
+          <div>
+            <label>分类</label>
+            <input v-model="form.category" type="text" placeholder="如：Claude Code / 部署 / 逆向" />
+          </div>
+          <div>
+            <label>状态</label>
+            <select v-model="form.status">
+              <option value="published">published</option>
+              <option value="draft">draft</option>
+            </select>
+          </div>
+          <div>
+            <label>排序</label>
+            <input v-model="form.sort" type="number" />
+          </div>
+        </div>
+        <div class="tut-toolbar">
+          <button class="btn small" :disabled="aiBusy" @click="aiFill">✨ AI 生成全文</button>
+          <button class="btn small" :disabled="aiBusy" @click="aiWrite('polish')">润色</button>
+          <button class="btn small" :disabled="aiBusy" @click="aiWrite('continue')">续写</button>
+          <button class="btn small" :disabled="aiBusy" @click="aiWrite('summary')">生成摘要</button>
+          <span v-if="aiBusy" class="ai-hint">AI 处理中…</span>
+        </div>
+        <div class="field-row">
+          <label>摘要</label>
+          <input v-model="form.summary" type="text" placeholder="卡片上显示的一句话摘要，可用「生成摘要」自动回填" />
+        </div>
+        <div class="field-row">
+          <label>标签（逗号分隔）</label>
+          <input v-model="form.tags" type="text" placeholder="用逗号分隔" />
+        </div>
+        <div class="tut-editor">
+          <textarea v-model="form.content" class="tut-input" placeholder="Markdown 正文，右侧实时预览"></textarea>
+          <div class="tut-preview tutorial-content" v-html="previewHtml"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="editing = null">取消</button>
+          <button class="btn primary" @click="saveEdit">保存</button>
+        </div>
+      </div>
+
+      <!-- 其他集合：普通表单 + AI 生成回填 -->
+      <div v-else class="modal">
         <h3>{{ editing.doc ? '编辑' : '新增' }}{{ SECTIONS.find((s) => s.id === editing.coll)?.label.slice(2) }}</h3>
         <div v-for="f in FIELDS[editing.coll]" :key="f.key" class="field-row">
           <label>{{ f.label }}{{ f.required ? ' *' : '' }}</label>
@@ -396,6 +523,12 @@ onMounted(loadAll);
             <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
           </select>
           <input v-else v-model="form[f.key]" :type="f.type === 'number' ? 'number' : 'text'" :placeholder="f.placeholder" />
+        </div>
+        <div class="ai-assist">
+          <button class="btn small" :disabled="aiBusy" @click="aiFill">
+            {{ aiBusy ? 'AI 生成中…' : '✨ AI 生成' }}
+          </button>
+          <span class="ai-hint">根据名称/链接生成描述、标签等并回填（仅后台可用；需在设置里配置 AI 或服务端 GlobalAi）</span>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="editing = null">取消</button>
@@ -411,9 +544,11 @@ onMounted(loadAll);
         <div class="tutorial-content" v-html="marked.parse(detail.content || detail.summary || '')"></div>
         <div class="toolbar" style="margin-top: 12px">
           <button class="btn small" @click="likeTutorial">👍 点赞</button>
-          <button class="btn small" :disabled="aiLoading === 'summary'" @click="aiAction('summary')">AI 摘要</button>
-          <button class="btn small" :disabled="aiLoading === 'polish'" @click="aiAction('polish')">AI 润色</button>
-          <button v-if="adminMode && aiOutput" class="btn small" @click="applyAiOutput">把润色结果存回正文</button>
+          <template v-if="adminMode">
+            <button class="btn small" :disabled="aiLoading === 'summary'" @click="aiAction('summary')">AI 摘要</button>
+            <button class="btn small" :disabled="aiLoading === 'polish'" @click="aiAction('polish')">AI 润色</button>
+            <button v-if="aiOutput" class="btn small" @click="applyAiOutput">把润色结果存回正文</button>
+          </template>
         </div>
         <div v-if="aiOutput" class="ai-box"><div class="ai-result">{{ aiOutput }}</div></div>
         <div class="modal-footer">

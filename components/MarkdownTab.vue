@@ -22,6 +22,8 @@ const aiApiKey = ref(localStorage.getItem('aiApiKey') || '');
 const aiModel = ref(localStorage.getItem('aiModel') || '');
 const aiLoading = ref(false);
 const aiResult = ref('');
+// AI 仅后台可用：在「AI 资源台」登录管理后，本页自动获得权限
+const isAdmin = ref(typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('admin_pwd'));
 
 const previewHtml = computed(() =>
   markdown.value ? marked.parse(markdown.value) : '',
@@ -81,7 +83,10 @@ async function summarize() {
     const hasKey = aiBaseUrl.value && aiApiKey.value;
     const res = await fetch('/api/tools/summarize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-password': sessionStorage.getItem('admin_pwd') || '',
+      },
       body: JSON.stringify({
         content: markdown.value.slice(0, 60000),
         mode: 'md',
@@ -180,18 +185,23 @@ async function copyMd() {
     </div>
 
     <div v-if="markdown" class="ai-box">
-      <h3 style="margin: 0 0 10px; font-size: 14px">🤖 AI 总结（可选）</h3>
-      <div class="ai-config">
-        <input v-model="aiBaseUrl" type="text" placeholder="API Base URL（如 https://api.openai.com）" />
-        <input v-model="aiApiKey" type="password" placeholder="API Key（只存本机 localStorage）" />
-        <input v-model="aiModel" type="text" placeholder="模型（如 gpt-4o-mini）" />
-      </div>
-      <button class="btn primary" :disabled="aiLoading" @click="summarize">
-        {{ aiLoading ? '总结中…' : 'AI 总结' }}
-      </button>
-      <span v-if="!aiApiKey" style="font-size: 12px; color: var(--text-dim); margin-left: 10px">
-        留空时使用服务端全局 AI 配置（若已设置 GLOBAL_AI_*）
-      </span>
+      <h3 style="margin: 0 0 10px; font-size: 14px">🤖 AI 总结（可选，仅后台）</h3>
+      <template v-if="isAdmin">
+        <div class="ai-config">
+          <input v-model="aiBaseUrl" type="text" placeholder="API Base URL（如 https://api.openai.com）" />
+          <input v-model="aiApiKey" type="password" placeholder="API Key（只存本机 localStorage）" />
+          <input v-model="aiModel" type="text" placeholder="模型（如 gpt-4o-mini）" />
+        </div>
+        <button class="btn primary" :disabled="aiLoading" @click="summarize">
+          {{ aiLoading ? '总结中…' : 'AI 总结' }}
+        </button>
+        <span v-if="!aiApiKey" style="font-size: 12px; color: var(--text-dim); margin-left: 10px">
+          留空时使用服务端全局 AI 配置（若已设置 GLOBAL_AI_*）
+        </span>
+      </template>
+      <p v-else style="font-size: 13px; color: var(--text-dim); margin: 0">
+        AI 功能仅在「AI 资源台」进入管理后台后可用。
+      </p>
       <div v-if="aiResult" class="ai-result">{{ aiResult }}</div>
     </div>
   </div>

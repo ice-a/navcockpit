@@ -50,14 +50,19 @@ export default defineEventHandler(async (event) => {
   const sliced = p.tail
     ? String(body.content).slice(-p.limit)
     : String(body.content).slice(0, p.limit || 60000);
-  const text = await callChat(
-    config,
-    [
-      { role: 'system', content: promptText },
-      { role: 'user', content: sliced },
-    ],
-    { temperature: p.temperature ?? 0.2 },
-  );
+  let text;
+  try {
+    text = await callChat(
+      config,
+      [
+        { role: 'system', content: promptText },
+        { role: 'user', content: sliced },
+      ],
+      { temperature: p.temperature ?? 0.2 },
+    );
+  } catch (e) {
+    throw createError({ statusCode: 502, message: '调用 AI 失败：' + (e?.message || e) });
+  }
   if (!text) throw createError({ statusCode: 422, message: 'AI 未返回内容，请重试' });
   return { text };
 });

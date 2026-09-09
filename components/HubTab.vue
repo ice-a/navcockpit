@@ -74,7 +74,6 @@ const FIELDS = {
 const activeSection = ref('stations');
 const lists = ref({ stations: [], tools: [], skills: [], vpns: [], servers: [], tutorials: [] });
 const loading = ref(false);
-const error = ref('');
 
 const adminMode = ref(false);
 const pwdInput = ref('');
@@ -99,7 +98,6 @@ function aiCfg() {
 async function aiFill() {
   const { coll } = editing.value;
   aiBusy.value = true;
-  error.value = '';
   try {
     const res = await fetch('/api/ai/assist', {
       method: 'POST',
@@ -116,7 +114,7 @@ async function aiFill() {
     }
     toast('AI 已生成并回填，检查后保存', 'success');
   } catch (e) {
-    error.value = `AI 生成失败：${e.message}`;
+    errToast('AI 生成失败：', e);
   } finally {
     aiBusy.value = false;
   }
@@ -124,7 +122,6 @@ async function aiFill() {
 // 教程编辑器内：润色 / 续写 / 生成摘要
 async function aiWrite(action) {
   aiBusy.value = true;
-  error.value = '';
   try {
     const res = await fetch('/api/tools/summarize', {
       method: 'POST',
@@ -144,7 +141,7 @@ async function aiWrite(action) {
       toast('已续写并追加到正文末尾', 'success');
     }
   } catch (e) {
-    error.value = `AI 操作失败：${e.message}`;
+    errToast('AI 操作失败：', e);
   } finally {
     aiBusy.value = false;
   }
@@ -161,9 +158,15 @@ const previewHtml = computed(() => {
 const currentList = computed(() => lists.value[activeSection.value] || []);
 const adminHeaders = () => ({ 'x-admin-password': sessionStorage.getItem('admin_pwd') || '' });
 
+// 操作失败反馈：就近 Toast（自动消失），超长报错只打控制台；页面横幅仅用于数据加载失败
+function errToast(prefix, e) {
+  const m = String(e?.message || e || '未知错误');
+  if (m.length > 200) console.error('[操作失败]', m);
+  toast(prefix + m.slice(0, 200), 'error');
+}
+
 async function loadAll() {
   loading.value = true;
-  error.value = '';
   try {
     const results = await Promise.all(
       SECTIONS.map((s) =>
@@ -235,7 +238,7 @@ async function saveEdit() {
   });
   if (!res.ok) {
     const b = await res.json().catch(() => ({}));
-    error.value = b.message || `保存失败 HTTP ${res.status}`;
+    errToast('保存失败：', new Error(b.message || `HTTP ${res.status}`));
     return;
   }
   editing.value = null;
@@ -246,23 +249,31 @@ async function saveEdit() {
 async function remove(item) {
   const ok = await confirm(`确定删除「${item.name || item.title}」？`, { danger: true, confirmText: '删除' });
   if (!ok) return;
-  await fetch(`/api/hub/${activeSection.value}/${item._id}`, {
+  const res = await fetch(`/api/hub/${activeSection.value}/${item._id}`, {
     method: 'DELETE',
     headers: adminHeaders(),
   });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}));
+    errToast('删除失败：', new Error(b.message || `HTTP ${res.status}`));
+    return;
+  }
   await loadAll();
   toast('已删除', 'success');
 }
 
 async function probeModels(item) {
   aiLoading.value = item._id;
-  error.value = '';
   try {
-    await fetch(`/api/hub/stations/${item._id}/models`, { method: 'POST', headers: adminHeaders() });
+    const res = await fetch(`/api/hub/stations/${item._id}/models`, { method: 'POST', headers: adminHeaders() });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error(b.message || `HTTP ${res.status}`);
+    }
     await loadAll();
     toast('模型列表已更新', 'success');
   } catch (e) {
-    error.value = `拉取模型失败：${e.message}`;
+    errToast('拉取模型失败：', e);
   } finally {
     aiLoading.value = '';
   }
@@ -271,9 +282,12 @@ async function probeModels(item) {
 async function healthCheck(item) {
   aiLoading.value = item._id;
   try {
-    await fetch(`/api/hub/stations/${item._id}/health`, { method: 'POST' });
+    const res = await fetch(`/api/hub/stations/${item._id}/health`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await loadAll();
     toast('探活完成', 'success');
+  } catch (e) {
+    errToast('探活失败：', e);
   } finally {
     aiLoading.value = '';
   }
@@ -322,7 +336,7 @@ async function aiAction(mode) {
     if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
     aiOutput.value = b.text;
   } catch (e) {
-    error.value = `AI 操作失败：${e.message}`;
+    errToast('AI 操作失败：', e);
   } finally {
     aiLoading.value = '';
   }
@@ -360,7 +374,8 @@ async function importBackup(ev) {
     await loadAll();
     toast('导入成功', 'success');
   } else {
-    error.value = '导入失败：' + (await res.json().catch(() => ({}))).message;
+    const b = await res.json().catch(() => ({}));
+    errToast('导入失败：', new Error(b.message || `HTTP ${res.status}`));
   }
   ev.target.value = '';
 }
@@ -397,7 +412,6 @@ onMounted(loadAll);
       </template>
     </div>
     <div v-if="pwdError" class="notice">{{ pwdError }}</div>
-    <div v-if="error" class="error">⚠️ {{ error }}</div>
 
     <!-- 中转站 -->
     <div v-if="activeSection === 'stations'" class="hub-grid">

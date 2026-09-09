@@ -1,0 +1,20 @@
+{
+  "users": [
+    { "login": "torvalds", "note": "Linux / Git 之父" },
+    { "login": "yyx990803", "note": "Vue.js 作者" },
+    { "login": "gaearon", "note": "React 核心开发者" },
+    { "login": "rich-harris", "note": "Svelte / Rollup 作者" },
+    { "login": "antfu", "note": "Vue / Vite 生态" },
+    { "login": "sindresorhus", "note": "开源狂人 / awesome" },
+    { "login": "tj", "note": "Express / Stylus" },
+    { "login": "addyosmani", "note": "Chrome 团队" },
+    { "login": "kentcdodds", "note": "React 教育者" },
+    { "login": "dhh", "note": "Ruby on Rails 作者" },
+    { "login": "simonw", "note": "Datasette / LLM 工具" },
+    { "login": "mitchellh", "note": "Terraform / Vagrant" },
+    { "login": "justjavac", "note": "free-programming-books" },
+    { "login": "diygod", "note": "RSSHub / Socialite" },
+    { "login": "fengmk2", "note": "cnpm / Node.js" },
+    { "login": "ruanyf", "note": "技术教程作者" }
+  ]
+}

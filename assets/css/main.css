@@ -11,6 +11,25 @@
   --green: #34d399;
   --yellow: #fbbf24;
   --red: #f87171;
+
+  /* 表面层级：1 = 卡片底，2 = 内嵌控件底，3 = 悬浮 / 激活态 */
+  --surface-1: var(--panel);
+  --surface-2: #1b2338;
+  --surface-3: #232d49;
+  /* 圆角 / 阴影 / 间距：全站统一口径，改一处即可整体换风格 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-1: 0 4px 14px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 18px 44px rgba(0, 0, 0, 0.45);
+  --gap: 14px;
+  --gap-sm: 8px;
+}
+
+/* 键盘可达性：统一焦点环 */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 * {
@@ -109,7 +128,18 @@ h2.zone small {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
+  gap: var(--gap);
+}
+
+/* 卡片外壳：卡片本身可能是 <a> / <button>，不能再往里塞按钮，
+   所以分享按钮作为兄弟节点挂在这层 relative 容器上 */
+.card-wrap {
+  position: relative;
+  display: flex;
+}
+.card-wrap > * {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 所有卡片统一尺寸 */
@@ -119,18 +149,19 @@ h2.zone small {
   height: 148px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   text-decoration: none;
   color: var(--text);
   overflow: hidden;
-  transition: transform 0.15s, border-color 0.15s, background 0.15s;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 a.card:hover {
   transform: translateY(-3px);
   border-color: var(--accent);
   background: var(--panel-hover);
+  box-shadow: var(--shadow-1);
 }
 
 .card.dead {
@@ -198,7 +229,7 @@ a.card:hover {
   font-size: 10px;
   font-weight: 700;
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: #222b47;
   color: #9fb0d8;
 }
@@ -271,10 +302,11 @@ a.card:hover {
   margin-bottom: 14px;
 }
 
-input[type='text'], input[type='password'], input[type='url'], input:not([type]), textarea, select {
+input[type='text'], input[type='password'], input[type='url'], input[type='number'],
+input[type='search'], input[type='email'], input[type='tel'], input:not([type]), textarea, select {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text);
   padding: 8px 12px;
   font-size: 13px;
@@ -300,11 +332,11 @@ button {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 14px;
   cursor: pointer;
   font-size: 13px;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s, filter 0.15s;
 }
 
 .btn:hover {
@@ -339,7 +371,7 @@ button {
 .gh-form button, .inline-form button {
   background: var(--accent);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: #fff;
   padding: 8px 18px;
   font-size: 13px;
@@ -364,12 +396,12 @@ button {
   gap: 6px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 14px 8px;
   cursor: pointer;
   color: var(--text);
   text-align: center;
-  transition: transform 0.15s, border-color 0.15s, background 0.15s;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
   font-family: inherit;
 }
 
@@ -377,6 +409,7 @@ button {
   transform: translateY(-3px);
   border-color: var(--accent);
   background: var(--panel-hover);
+  box-shadow: var(--shadow-1);
 }
 
 .user-card.active {
@@ -404,7 +437,7 @@ button {
 .error {
   background: #3a1a1f;
   border: 1px solid #6b2530;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px 20px;
   color: #ff9aa5;
   margin-bottom: 16px;
@@ -413,7 +446,7 @@ button {
 .notice {
   background: #2b2413;
   border: 1px solid #5c4c1a;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 12px 18px;
   color: #f5d98a;
   margin-bottom: 16px;
@@ -584,11 +617,12 @@ button {
   gap: 2px;
 }
 .hot-item {
+  position: relative;
   display: flex;
   align-items: baseline;
   gap: 14px;
-  padding: 11px 14px;
-  border-radius: 10px;
+  padding: 11px 40px 11px 14px; /* 右侧留给分享按钮 */
+  border-radius: var(--radius-md);
   transition: background 0.15s;
 }
 .hot-item:hover { background: var(--panel); }
@@ -628,17 +662,25 @@ button {
 .hub-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px;
+  gap: var(--gap);
 }
 
 .hub-card {
+  position: relative; /* 分享按钮的定位参照 */
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.hub-card:hover {
+  border-color: var(--accent);
+  background: var(--panel-hover);
+  box-shadow: var(--shadow-1);
 }
 
 .hub-card h3 {
@@ -710,11 +752,12 @@ button {
 .modal {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 22px;
   width: min(680px, 100%);
   max-height: 85vh;
   overflow: auto;
+  box-shadow: var(--shadow-2);
 }
 
 .modal h3 {
@@ -731,7 +774,7 @@ button {
 .tutorial-content {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px 20px;
   font-size: 14px;
   line-height: 1.7;
@@ -796,7 +839,7 @@ button {
 .md-preview {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px 20px;
   min-height: 420px;
   font-size: 14px;
@@ -837,7 +880,7 @@ button {
   margin-top: 16px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px;
 }
 
@@ -873,13 +916,13 @@ button {
 .avatar-canvas-box {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 20px;
 }
 
 .avatar-canvas-box canvas {
   display: block;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 
 .avatar-controls {
@@ -936,6 +979,10 @@ button {
   --green: #15936d;
   --yellow: #b8860b;
   --red: #d9484a;
+  --surface-2: #f1f4fb;
+  --surface-3: #e4eaf8;
+  --shadow-1: 0 4px 14px rgba(28, 36, 56, 0.12);
+  --shadow-2: 0 18px 44px rgba(28, 36, 56, 0.18);
 }
 [data-theme='light'] body {
   background: radial-gradient(1200px 600px at 20% -10%, #dde6fb 0%, var(--bg) 55%);
@@ -955,6 +1002,10 @@ button {
     --green: #15936d;
     --yellow: #b8860b;
     --red: #d9484a;
+    --surface-2: #f1f4fb;
+    --surface-3: #e4eaf8;
+    --shadow-1: 0 4px 14px rgba(28, 36, 56, 0.12);
+    --shadow-2: 0 18px 44px rgba(28, 36, 56, 0.18);
   }
   :root:not([data-theme='dark']) body {
     background: radial-gradient(1200px 600px at 20% -10%, #dde6fb 0%, var(--bg) 55%);
@@ -976,6 +1027,7 @@ button {
   transition: all 0.15s;
 }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); background: var(--panel-hover); }
+.icon-btn.small { width: 28px; height: 28px; font-size: 13px; }
 
 /* ============ 抽屉（设置 / 通用） ============ */
 .drawer-mask {
@@ -1034,7 +1086,7 @@ button {
 .switch input:checked + .slider::before { transform: translateX(18px); }
 
 /* 分段控件 */
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
 .seg button {
   background: var(--panel); color: var(--text-dim); border: none;
   padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
@@ -1082,15 +1134,15 @@ button {
 .nav-sidebar button {
   display: flex; align-items: center; justify-content: space-between;
   width: 100%; text-align: left; background: transparent; border: none;
-  color: var(--text-dim); padding: 9px 12px; border-radius: 8px; cursor: pointer;
+  color: var(--text-dim); padding: 9px 12px; border-radius: var(--radius-md); cursor: pointer;
   font-size: 13px; font-family: inherit; transition: 0.15s;
 }
 .nav-sidebar button:hover { color: var(--text); background: var(--panel-hover); }
 .nav-sidebar button.active { color: #fff; background: var(--accent); }
 .nav-sidebar button .cnt { font-size: 11px; opacity: 0.7; }
-.nav-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 8px; }
+.nav-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: var(--gap-sm); }
 /* 导航卡片紧凑化：填满格子、减少留白 */
-.nav-cards .card { height: auto; min-height: 0; padding: 9px 11px; border-radius: 10px; }
+.nav-cards .card { height: auto; min-height: 0; padding: 11px 13px; border-radius: var(--radius-md); }
 .nav-cards .card-title { gap: 7px; }
 .nav-cards .card-host { margin-top: 3px; font-size: 11.5px; }
 .nav-cards .card:hover { border-color: var(--accent); transform: translateY(-1px); }

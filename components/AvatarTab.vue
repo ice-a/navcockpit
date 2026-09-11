@@ -17,7 +17,7 @@ const seedText = ref('');
 const bgColor = ref('#151b2e');
 const animating = ref(true);
 
-let av = null;
+const av = ref(null); // 当前头像数据（用 ref，分享载荷才能随「随机一张」更新）
 let rafId = null;
 let ctx = null;
 
@@ -36,13 +36,13 @@ function generate() {
     }
     opts.seed = h >>> 0;
   }
-  av = kit.value.generateAvatar(species.value, opts);
-  if (!seedText.value.trim()) seedText.value = String(av.seed);
+  av.value = kit.value.generateAvatar(species.value, opts);
+  if (!seedText.value.trim()) seedText.value = String(av.value.seed);
 }
 
 function redraw(t = performance.now() / 1000) {
-  if (!ctx || !av) return;
-  kit.value.renderAvatar(ctx, av, t, 320, {
+  if (!ctx || !av.value) return;
+  kit.value.renderAvatar(ctx, av.value, t, 320, {
     bgColor: bgColor.value === 'transparent' ? undefined : bgColor.value,
   });
 }
@@ -60,14 +60,14 @@ function regenerate() {
 function download() {
   const out = document.createElement('canvas');
   out.width = out.height = 1024;
-  kit.value.renderAvatar(out.getContext('2d'), av, performance.now() / 1000, 1024, {
+  kit.value.renderAvatar(out.getContext('2d'), av.value, performance.now() / 1000, 1024, {
     bgColor: bgColor.value === 'transparent' ? undefined : bgColor.value,
     transparent: bgColor.value === 'transparent',
   });
   out.toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `ugly-avatar-${engine.value}-${av.seed}.png`;
+    a.download = `ugly-avatar-${engine.value}-${av.value.seed}.png`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }, 'image/png');
@@ -80,6 +80,19 @@ onMounted(() => {
   ctx = canvas.value.getContext('2d');
   generate();
   loop();
+});
+
+// 分享当前这张头像：把引擎/物种/seed 一起存进分享快照，别人看到的就是同一张脸
+const sharePayload = computed(() => {
+  const name = speciesOptions.value.find((s) => s.id === species.value)?.name || species.value;
+  return {
+    type: 'avatar',
+    title: av.value ? '丑头像 #' + av.value.seed : '丑头像',
+    desc: '引擎 ' + engine.value + ' · 物种' + String(name).replace(/^[^ ]+ /, ''),
+    url: '',
+    badge: '🎨 个性头像',
+    avatar: { engine: engine.value, species: species.value, seed: av.value ? av.value.seed : 0 },
+  };
 });
 
 onBeforeUnmount(() => cancelAnimationFrame(rafId));
@@ -130,6 +143,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId));
             {{ animating ? '⏸ 暂停动画' : '▶️ 播放动画' }}
           </button>
           <button class="btn" @click="download">⬇️ 下载 PNG</button>
+          <ShareButton :payload="sharePayload" inline label="分享这张头像" />
         </div>
         <p style="font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 4px 0 0">
           同一个 Seed 永远生成同一张头像，可以收藏喜欢的 Seed。

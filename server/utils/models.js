@@ -106,6 +106,27 @@ const schemas = {
     },
     { timestamps: true },
   ),
+  // 分享快照：每条分享一个随机 sid，链接形如 /?share=<sid>。
+  // 存的是快照（标题/描述/链接/头像参数），源记录被删后分享页仍可访问。
+  Share: new Schema(
+    {
+      sid: { type: String, required: true, unique: true, index: true },
+      type: { type: String, default: 'card' }, // hub | nav | repo | user | dns | hot | avatar
+      coll: { type: String, default: '' }, // hub 集合名（stations / tools / ...）
+      refId: { type: String, default: '' }, // 源文档 _id / 导航站的 URL；同一 coll+refId 复用同一个 sid
+      title: { type: String, default: '' },
+      desc: { type: String, default: '' },
+      url: { type: String, default: '' },
+      badge: { type: String, default: '' }, // 海报左上角标签，如「🧰 工具」
+      avatar: {
+        engine: { type: String, default: 'A' }, // A | B | C
+        species: { type: String, default: 'random' },
+        seed: { type: Number, default: 0 },
+      },
+      views: { type: Number, default: 0 },
+    },
+    { timestamps: true },
+  ),
 };
 
 export function getModel(name) {

@@ -19,6 +19,28 @@ const github = computed(() => {
   return g;
 });
 
+// 分享载荷：用户卡 / 仓库卡
+function shareUser(u) {
+  return {
+    type: 'user',
+    refId: u.login,
+    title: `@${u.login}`,
+    desc: u.note || 'GitHub 用户',
+    url: `https://github.com/${u.login}`,
+    badge: '👤 GitHub 用户',
+  };
+}
+function shareRepo(repo) {
+  return {
+    type: 'repo',
+    refId: repo.fullName,
+    title: repo.name,
+    desc: repo.description || repo.fullName,
+    url: repo.url || '',
+    badge: repo.private ? '🔒 私有仓库' : '📦 公开仓库',
+  };
+}
+
 function timeAgo(iso) {
   if (!iso) return '';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -94,18 +116,19 @@ onUnmounted(() => {
     <section v-if="creators.length">
       <h2 class="zone">🔥 热门 GitHub 用户 <small>点击卡片查看 TA 的公开仓库 · 搜索也会加入此列表</small></h2>
       <div class="wall">
-        <button
-          v-for="u in creators"
-          :key="u.login"
-          class="user-card"
-          :class="{ active: github && github.user === u.login }"
-          @click="selectUser(u.login)"
-          :title="`查看 @${u.login} 的公开仓库`"
-        >
-          <img :src="`https://github.com/${u.login}.png?size=64`" :alt="u.login" loading="lazy" />
-          <span class="login">@{{ u.login }}</span>
-          <span class="note">{{ u.note || (u.addedByUser ? '你搜索过' : '') }}</span>
-        </button>
+        <div v-for="u in creators" :key="u.login" class="card-wrap">
+          <button
+            class="user-card"
+            :class="{ active: github && github.user === u.login }"
+            @click="selectUser(u.login)"
+            :title="`查看 @${u.login} 的公开仓库`"
+          >
+            <img :src="`https://github.com/${u.login}.png?size=64`" :alt="u.login" loading="lazy" />
+            <span class="login">@{{ u.login }}</span>
+            <span class="note">{{ u.note || (u.addedByUser ? '你搜索过' : '') }}</span>
+          </button>
+          <ShareButton :payload="shareUser(u)" :label="`分享 @${u.login}`" />
+        </div>
       </div>
     </section>
 
@@ -126,31 +149,32 @@ onUnmounted(() => {
       </form>
       <div v-if="github.error" class="error">GitHub 仓库加载失败：{{ github.error }}</div>
       <div v-else class="grid">
-        <component
-          :is="repo.private ? 'div' : 'a'"
-          v-for="repo in github.repos"
-          :key="repo.fullName"
-          class="card"
-          :class="{ dead: repo.private }"
-          :href="repo.private ? undefined : repo.url"
-          target="_blank"
-          rel="noopener"
-        >
-          <div class="card-title">
-            <span class="repo-icon">{{ repo.private ? '🔒' : '📦' }}</span>
-            <span class="title-text">{{ repo.name }}</span>
-            <span class="chip" :class="repo.private ? 'private' : 'public'">
-              {{ repo.private ? 'Private' : 'Public' }}
-            </span>
-          </div>
-          <div class="card-host">{{ repo.description || repo.fullName }}</div>
-          <div class="card-status repo-meta">
-            <span v-if="repo.language">⬢ {{ repo.language }}</span>
-            <span>⭐ {{ repo.stars }}</span>
-            <span v-if="repo.archived">已归档</span>
-            <span>更新于 {{ timeAgo(repo.pushedAt) }}</span>
-          </div>
-        </component>
+        <div v-for="repo in github.repos" :key="repo.fullName" class="card-wrap">
+          <component
+            :is="repo.private ? 'div' : 'a'"
+            class="card"
+            :class="{ dead: repo.private }"
+            :href="repo.private ? undefined : repo.url"
+            target="_blank"
+            rel="noopener"
+          >
+            <div class="card-title">
+              <span class="repo-icon">{{ repo.private ? '🔒' : '📦' }}</span>
+              <span class="title-text">{{ repo.name }}</span>
+              <span class="chip" :class="repo.private ? 'private' : 'public'">
+                {{ repo.private ? 'Private' : 'Public' }}
+              </span>
+            </div>
+            <div class="card-host">{{ repo.description || repo.fullName }}</div>
+            <div class="card-status repo-meta">
+              <span v-if="repo.language">⬢ {{ repo.language }}</span>
+              <span>⭐ {{ repo.stars }}</span>
+              <span v-if="repo.archived">已归档</span>
+              <span>更新于 {{ timeAgo(repo.pushedAt) }}</span>
+            </div>
+          </component>
+          <ShareButton :payload="shareRepo(repo)" :label="'分享 ' + repo.name" />
+        </div>
       </div>
     </section>
     <div v-if="loading" class="loading">正在加载 GitHub 仓库…</div>

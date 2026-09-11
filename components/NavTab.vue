@@ -117,6 +117,18 @@ watch(
   },
 );
 
+// 分享载荷：导航站没有 _id，用链接本身当 refId（同一链接复用同一条分享）
+function sharePayload(l) {
+  return {
+    type: 'nav',
+    refId: l.url,
+    title: l.name,
+    desc: l.desc || l.url,
+    url: l.url,
+    badge: '🧭 网站导航',
+  };
+}
+
 onMounted(async () => {
   try {
     const res = await fetch('/link.json');
@@ -182,27 +194,28 @@ onMounted(async () => {
           <section v-for="[cat, items] in grouped" :key="cat">
             <h2 class="zone">{{ cat }} <small>{{ items.length }} 条</small></h2>
             <div class="nav-cards">
-              <a
-                v-for="l in items"
-                :key="l.url"
-                class="card"
-                :class="{ offline: deadMap[l.url] }"
-                :href="l.url"
-                target="_blank"
-                rel="noopener nofollow"
-              >
-                <div class="card-title">
-                  <img
-                    v-if="favicon(l.url)"
-                    :src="favicon(l.url)"
-                    style="width: 16px; height: 16px; flex: 0 0 16px; border-radius: 4px"
-                    loading="lazy"
-                    onerror="this.style.visibility='hidden'"
-                  />
-                  <span class="title-text">{{ l.name }}</span>
-                </div>
-                <div class="card-host">{{ l.desc || l.url }}</div>
-              </a>
+              <div v-for="l in items" :key="l.url" class="card-wrap">
+                <a
+                  class="card"
+                  :class="{ offline: deadMap[l.url] }"
+                  :href="l.url"
+                  target="_blank"
+                  rel="noopener nofollow"
+                >
+                  <div class="card-title">
+                    <img
+                      v-if="favicon(l.url)"
+                      :src="favicon(l.url)"
+                      style="width: 16px; height: 16px; flex: 0 0 16px; border-radius: 4px"
+                      loading="lazy"
+                      onerror="this.style.visibility='hidden'"
+                    />
+                    <span class="title-text">{{ l.name }}</span>
+                  </div>
+                  <div class="card-host">{{ l.desc || l.url }}</div>
+                </a>
+                <ShareButton :payload="sharePayload(l)" :label="`分享 ${l.name}`" />
+              </div>
             </div>
           </section>
           <div v-if="!grouped.length" class="empty">没有匹配的站点，换个关键词试试</div>

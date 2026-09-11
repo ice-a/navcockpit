@@ -39,6 +39,18 @@ async function select(id, force = false) {
   }
 }
 
+// 分享载荷：热榜条目没有稳定 id，用链接当 refId
+function sharePayload(it) {
+  return {
+    type: 'hot',
+    refId: it.url || it.title,
+    title: it.title,
+    desc: it.extra || '热榜条目',
+    url: it.url || '',
+    badge: '🔥 热榜',
+  };
+}
+
 onMounted(loadList);
 </script>
 
@@ -71,6 +83,7 @@ onMounted(loadList);
         <span class="hot-rank" :class="{ top1: i === 0, top2: i === 1, top3: i === 2 }">{{ i + 1 }}</span>
         <a class="hot-title" :href="it.url" target="_blank" rel="noopener">{{ it.title }}</a>
         <span v-if="it.extra" class="hot-extra">{{ it.extra }}</span>
+        <ShareButton :payload="sharePayload(it)" inline :label="'分享 ' + it.title" />
       </li>
     </ol>
     <div v-else-if="activeId" class="empty">暂无数据</div>

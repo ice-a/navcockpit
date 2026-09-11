@@ -380,6 +380,20 @@ async function importBackup(ev) {
   ev.target.value = '';
 }
 
+// 分享载荷：统一取「标题 / 描述 / 链接」，refId 用 MongoDB 的 _id
+function sharePayload(item) {
+  const coll = activeSection.value;
+  return {
+    type: 'hub',
+    coll,
+    refId: item._id,
+    title: item.name || item.title || '未命名',
+    desc: item.desc || item.intro || item.summary || item.region || '',
+    url: item.siteURL || item.home || item.web || item.url || '',
+    badge: SECTIONS.find((s) => s.id === coll)?.label || '分享',
+  };
+}
+
 onMounted(loadAll);
 </script>
 
@@ -415,7 +429,8 @@ onMounted(loadAll);
 
     <!-- 中转站 -->
     <div v-if="activeSection === 'stations'" class="hub-grid">
-      <div v-for="s in currentList" :key="s._id" class="hub-card">
+      <div v-for="s in currentList" :key="s._id" class="hub-card shareable">
+        <ShareButton :payload="sharePayload(s)" :label="`分享 ${s.name}`" />
         <h3>
           <span class="status-dot" :class="s.status"></span>
           {{ s.name }}
@@ -439,7 +454,8 @@ onMounted(loadAll);
 
     <!-- 通用卡片：工具/Skills/VPN/服务器 -->
     <div v-else-if="activeSection !== 'tutorials'" class="hub-grid">
-      <div v-for="item in currentList" :key="item._id" class="hub-card">
+      <div v-for="item in currentList" :key="item._id" class="hub-card shareable">
+        <ShareButton :payload="sharePayload(item)" :label="`分享 ${item.name}`" />
         <h3>
           <span class="status-dot" :class="item.status"></span>
           {{ item.name }}
@@ -458,7 +474,8 @@ onMounted(loadAll);
 
     <!-- 教程 -->
     <div v-else class="hub-grid">
-      <div v-for="t in currentList" :key="t._id" class="hub-card" @click="openTutorial(t)" style="cursor: pointer">
+      <div v-for="t in currentList" :key="t._id" class="hub-card shareable" @click="openTutorial(t)" style="cursor: pointer">
+        <ShareButton :payload="sharePayload(t)" :label="`分享 ${t.title}`" />
         <h3>
           <span class="status-dot" :class="t.status"></span>
           {{ t.title }}

@@ -5,6 +5,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { TABS } from '~/lib/tabs';
 import { useSettings } from '~/lib/useSettings';
 import { useTheme } from '~/lib/useTheme';
+import { useShare } from '~/lib/useShare';
 import DnsTab from '~/components/DnsTab.vue';
 import NavTab from '~/components/NavTab.vue';
 import HotTab from '~/components/HotTab.vue';
@@ -16,6 +17,7 @@ import SettingsDrawer from '~/components/SettingsDrawer.vue';
 import CommandPalette from '~/components/CommandPalette.vue';
 import Toast from '~/components/Toast.vue';
 import ConfirmDialog from '~/components/ConfirmDialog.vue';
+import ShareDialog from '~/components/ShareDialog.vue';
 
 const { gaId, adsenseClient, clarityId, bingUetId } = useRuntimeConfig().public;
 
@@ -29,6 +31,7 @@ useHead({
 });
 
 const { settings } = useSettings();
+const { showShare } = useShare();
 useTheme();
 
 const activeTab = ref(localStorage.getItem('activeTab') || settings.defaultTab || 'nav');
@@ -105,12 +108,39 @@ function onKey(e) {
   }
 }
 
+// 分享类型 → 对应标签，打开 ?share= 时顺便切过去
+const TAB_BY_SHARE_TYPE = {
+  hub: 'hub',
+  nav: 'nav',
+  repo: 'github',
+  user: 'github',
+  dns: 'dns',
+  hot: 'hot',
+  avatar: 'avatar',
+};
+
 onMounted(() => {
   window.addEventListener('keydown', onKey);
   fetchYiyan();
+  const params = new URLSearchParams(location.search);
+
   // 支持 ?tab=xxx 深链直达某模块
-  const qp = new URLSearchParams(location.search).get('tab');
+  const qp = params.get('tab');
   if (qp && TABS.some((t) => t.id === qp)) activeTab.value = qp;
+
+  // 支持 ?share=<sid>：拉取分享快照并弹出分享卡
+  const sid = params.get('share');
+  if (sid) {
+    fetch(`/api/share/${encodeURIComponent(sid)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((doc) => {
+        if (!doc) return;
+        const tab = TAB_BY_SHARE_TYPE[doc.type];
+        if (tab && TABS.some((t) => t.id === tab)) activeTab.value = tab;
+        showShare(doc);
+      })
+      .catch(() => {});
+  }
 });
 onUnmounted(() => window.removeEventListener('keydown', onKey));
 </script>
@@ -148,6 +178,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
   <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @navigate="onPaletteNavigate" @github-user="onPaletteGithub" />
   <Toast />
   <ConfirmDialog />
+  <ShareDialog />
 </template>
 
 <style>

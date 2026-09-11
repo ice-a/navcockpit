@@ -90,6 +90,19 @@ async function fetchData() {
   }
 }
 
+// 分享载荷：把站点状态一起写进描述
+function sharePayload(card) {
+  const st = statusOf(card);
+  return {
+    type: 'dns',
+    refId: card.name,
+    title: card.title || card.label,
+    desc: card.name + ' · ' + st.text,
+    url: 'https://' + card.name,
+    badge: '🌐 Cloudflare DNS',
+  };
+}
+
 onMounted(() => {
   fetchData();
   tickTimer = setInterval(() => {
@@ -134,26 +147,27 @@ onUnmounted(() => clearInterval(tickTimer));
           <small>{{ zone.onlineCount }}/{{ zone.total }} 在线<template v-if="zone.hiddenCount"> · {{ zone.hiddenCount }} 个离线已隐藏</template></small>
         </h2>
         <div v-if="zone.visible.length" class="grid">
-          <a
-            v-for="card in zone.visible"
-            :key="card.name"
-            class="card"
-            :class="{ offline: card.rank === 2 }"
-            :href="href(card)"
-            target="_blank"
-            rel="noopener"
-          >
-            <div class="card-title">
-              <span class="dot" :class="statusOf(card).dot"></span>
-              <span class="title-text">{{ card.title || card.label }}</span>
-            </div>
-            <div class="card-host">{{ card.name }}</div>
-            <div class="card-status" :class="statusOf(card).cls">{{ statusOf(card).text }}</div>
-            <div class="chips">
-              <span v-if="card.isRoot" class="chip root">根域名</span>
-              <span v-if="card.proxied" class="chip cf">CF</span>
-            </div>
-          </a>
+          <div v-for="card in zone.visible" :key="card.name" class="card-wrap">
+            <a
+              class="card"
+              :class="{ offline: card.rank === 2 }"
+              :href="href(card)"
+              target="_blank"
+              rel="noopener"
+            >
+              <div class="card-title">
+                <span class="dot" :class="statusOf(card).dot"></span>
+                <span class="title-text">{{ card.title || card.label }}</span>
+              </div>
+              <div class="card-host">{{ card.name }}</div>
+              <div class="card-status" :class="statusOf(card).cls">{{ statusOf(card).text }}</div>
+              <div class="chips">
+                <span v-if="card.isRoot" class="chip root">根域名</span>
+                <span v-if="card.proxied" class="chip cf">CF</span>
+              </div>
+            </a>
+            <ShareButton :payload="sharePayload(card)" :label="'分享 ' + (card.title || card.label)" />
+          </div>
         </div>
         <div v-else class="empty">该域名下暂无可访问的子域名</div>
       </section>

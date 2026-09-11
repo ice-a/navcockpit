@@ -10,7 +10,7 @@ function normalizeBase(baseURL) {
 }
 
 // Base URL 只填根域名也行：依次尝试 OpenAI 兼容的多种模型列表路径
-export function modelEndpointCandidates(baseURL) {
+function modelEndpointCandidates(baseURL) {
   const base = normalizeBase(baseURL);
   return [
     `${base}/v1/models`,

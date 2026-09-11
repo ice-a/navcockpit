@@ -17,7 +17,7 @@ turndown.addRule('removeNoise', {
   replacement: () => '',
 });
 
-export function pickArticleNode($) {
+function pickArticleNode($) {
   const candidates = [
     'article',
     'main article',

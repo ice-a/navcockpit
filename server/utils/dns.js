@@ -37,7 +37,7 @@ async function cfFetchAll(token, path) {
   return out;
 }
 
-export function parseZoneFilter(raw) {
+function parseZoneFilter(raw) {
   return (raw || '')
     .split(',')
     .map((s) => s.trim().toLowerCase())

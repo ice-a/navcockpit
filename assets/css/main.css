@@ -1111,9 +1111,6 @@ button {
 }
 .palette-input:focus { border-bottom-color: var(--accent); }
 .palette-list { max-height: 56vh; overflow: auto; padding: 8px; }
-.palette-group-title {
-  font-size: 11px; color: var(--text-dim); padding: 10px 12px 4px; text-transform: uppercase; letter-spacing: 0.5px;
-}
 .palette-item {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; border-radius: 10px; cursor: pointer; color: var(--text);

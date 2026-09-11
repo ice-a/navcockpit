@@ -4,6 +4,13 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-09-01',
   ssr: false, // 与原项目一致的纯 SPA，避免 canvas 等浏览器 API 的水合问题
 
+  experimental: {
+    // app manifest 供 SSR 下的路由规则 / 预加载用，本项目是纯 SPA，用不到。
+    // 关掉可消除 dev 启动时 "#app-manifest" 无法解析的 pre-transform 报错
+    //（该别名指向的 dev manifest JSON 在 Vite 就绪前还没落盘）。
+    appManifest: false,
+  },
+
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {

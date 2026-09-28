@@ -1,6 +1,9 @@
 <script setup>
-// 热榜（服务端抓取，前端只消费）。已移除微博/V2EX/掘金/Product Hunt 与「源项目」外链。
+// 热榜（服务端抓取，前端只消费）。布局沿用：居中源胶囊 + 极简工具条 + 榜单列表。
+// 控件全部使用 Arco Design Vue。
 import { ref, onMounted } from 'vue';
+import { IconRefresh } from '@arco-design/web-vue/es/icon';
+import ShareButton from '~/components/ShareButton.vue';
 
 const sources = ref([]);
 const activeId = ref('');
@@ -39,16 +42,8 @@ async function select(id, force = false) {
   }
 }
 
-// 分享载荷：热榜条目没有稳定 id，用链接当 refId
 function sharePayload(it) {
-  return {
-    type: 'hot',
-    refId: it.url || it.title,
-    title: it.title,
-    desc: it.extra || '热榜条目',
-    url: it.url || '',
-    badge: '🔥 热榜',
-  };
+  return { type: 'hot', refId: it.url || it.title, title: it.title, desc: it.extra || '热榜条目', url: it.url || '', badge: '🔥 热榜' };
 }
 
 onMounted(loadList);
@@ -58,26 +53,31 @@ onMounted(loadList);
   <div class="hot-wrap">
     <!-- 源切换：居中胶囊 -->
     <div class="hot-tabs">
-      <button
+      <a-button
         v-for="s in sources"
         :key="s.id"
-        class="hot-tab"
-        :class="{ active: activeId === s.id }"
+        size="small"
+        shape="round"
+        :type="activeId === s.id ? 'primary' : 'secondary'"
         @click="select(s.id)"
       >
         {{ s.name }}
-      </button>
+      </a-button>
     </div>
 
     <!-- 极简工具条 -->
-    <div class="hot-toolbar" v-if="activeId">
-      <span v-if="fromCache" class="cache-dot" title="来自缓存">缓存</span>
-      <button class="icon-btn small" title="强制刷新" :disabled="loading" @click="select(activeId, true)">⟳</button>
+    <div v-if="activeId" class="hot-toolbar">
+      <a-tag v-if="fromCache" size="small" title="来自缓存">缓存</a-tag>
+      <span v-if="updatedTime">更新于 {{ updatedTime }}</span>
+      <a-tooltip content="强制刷新" position="top">
+        <a-button size="mini" shape="circle" :loading="loading" @click="select(activeId, true)">
+          <template #icon><IconRefresh /></template>
+        </a-button>
+      </a-tooltip>
     </div>
 
-    <div v-if="error" class="error">⚠️ {{ error }}</div>
+    <a-alert v-if="error" type="error" :title="error" />
     <div v-if="loading" class="loading">加载中…</div>
-
     <ol v-else-if="items.length" class="hot-list">
       <li v-for="(it, i) in items" :key="i" class="hot-item">
         <span class="hot-rank" :class="{ top1: i === 0, top2: i === 1, top3: i === 2 }">{{ i + 1 }}</span>
@@ -89,3 +89,7 @@ onMounted(loadList);
     <div v-else-if="activeId" class="empty">暂无数据</div>
   </div>
 </template>
+
+<style scoped>
+.hot-toolbar { gap: 8px; }
+</style>

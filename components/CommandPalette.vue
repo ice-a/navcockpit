@@ -1,20 +1,22 @@
 <script setup>
 // 全局搜索（命令面板）：跨「模块切换 / 网站导航 / AI 资源台 / GitHub 用户」检索。
-// ⌘K / Ctrl+K 或 / 唤起（由 app.vue 控制 open）。
+// 布局沿用：顶部居中的遮罩面板；控件使用 Arco Design Vue。
 import { ref, computed, watch, nextTick } from 'vue';
-import { TABS } from '~/lib/tabs';
+import { TABS, TAB_ICONS } from '~/lib/tabs';
+import { boardIcon } from '~/lib/boardIcons';
+import { IconLink, IconUser } from '@arco-design/web-vue/es/icon';
 
 const props = defineProps({ open: { type: Boolean, default: false } });
 const emit = defineEmits(['close', 'navigate', 'githubUser']);
 
 const query = ref('');
-const items = ref([]); // 合并后的可检索项
+const items = ref([]);
 const active = ref(0);
 const inputEl = ref(null);
 
 const tabActions = TABS.map((t) => ({
   type: 'tab',
-  icon: t.icon,
+  icon: TAB_ICONS[t.id],
   title: `打开 ${t.label}`,
   sub: '切换到该模块',
   tab: t.id,
@@ -24,32 +26,26 @@ async function ensureData() {
   if (items.value.length && items.value.some((i) => i.type !== 'tab')) return;
   const extra = [];
   try {
-    const links = await fetch('/link.json').then((r) => r.json());
-    for (const l of links.slice(0, 400)) {
-      extra.push({ type: 'nav', icon: '🔗', title: l.name, sub: l.desc || l.url, url: l.url });
+    const links = await fetch('/api/nav/links').then((r) => (r.ok ? r.json() : []));
+    for (const l of links.slice(0, 500)) {
+      extra.push({ type: 'nav', icon: IconLink, title: l.name, sub: l.desc || l.url, url: l.url });
     }
   } catch {}
   try {
-    const creators = await fetch('/api/creators').then((r) => r.json());
+    const creators = await fetch('/api/creators').then((r) => r.ok ? r.json() : []);
     for (const c of creators) {
-      extra.push({ type: 'gh', icon: '👤', title: '@' + c.login, sub: c.note || 'GitHub 用户', login: c.login });
+      extra.push({ type: 'gh', icon: IconUser, title: '@' + c.login, sub: c.note || 'GitHub 用户', login: c.login });
     }
   } catch {}
   try {
-    const cols = ['stations', 'tools', 'skills', 'vpns', 'servers', 'tutorials'];
-    const names = { stations: '🛰', tools: '🧰', skills: '🧩', vpns: '🔒', servers: '🖥', tutorials: '📚' };
+    // 板块是动态的（后台可新增），先取板块再逐个取条目
+    const boards = await fetch('/api/hub/boards').then((r) => (r.ok ? r.json() : [])).catch(() => []);
     await Promise.all(
-      cols.map(async (c) => {
-        const list = await fetch(`/api/hub/${c}`).then((r) => (r.ok ? r.json() : []));
+      boards.map(async (b) => {
+        const list = await fetch(`/api/hub/${b.key}`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
         for (const it of list) {
           const u = it.home || it.web || it.url || it.siteURL;
-          extra.push({
-            type: 'hub',
-            icon: names[c],
-            title: it.name || it.title,
-            sub: it.desc || it.intro || it.summary || c,
-            url: u,
-          });
+          extra.push({ type: 'hub', icon: boardIcon(b.icon), title: it.name || it.title, sub: it.desc || it.intro || it.summary || b.name, url: u });
         }
       }),
     );
@@ -73,9 +69,7 @@ const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
   const base = items.value.length ? items.value : tabActions;
   if (!q) return base.slice(0, 50);
-  return base
-    .filter((i) => `${i.title} ${i.sub || ''}`.toLowerCase().includes(q))
-    .slice(0, 50);
+  return base.filter((i) => `${i.title} ${i.sub || ''}`.toLowerCase().includes(q)).slice(0, 50);
 });
 
 watch(filtered, () => (active.value = 0));
@@ -105,38 +99,42 @@ function onKey(e) {
 </script>
 
 <template>
-  <transition name="fade">
-    <div v-if="open" class="palette-mask" @click.self="$emit('close')">
-      <div class="palette" @keydown="onKey">
-        <input
-          ref="inputEl"
-          class="palette-input"
-          v-model="query"
-          placeholder="搜索导航 / AI 资源 / GitHub 用户，或跳转模块…"
-        />
-        <div class="palette-list">
-          <template v-if="filtered.length">
-            <div
-              v-for="(it, i) in filtered"
-              :key="i"
-              class="palette-item"
-              :class="{ active: i === active }"
-              @mouseenter="active = i"
-              @click="activate(it)"
-            >
-              <span class="pi-icon">{{ it.icon }}</span>
-              <span class="pi-title">{{ it.title }}</span>
-              <span class="pi-sub">{{ it.sub }}</span>
-            </div>
-          </template>
-          <div v-else class="palette-empty">没有匹配结果</div>
+  <div v-if="open" class="palette-mask" @click.self="$emit('close')">
+    <div class="palette" @keydown="onKey">
+      <a-input
+        ref="inputEl"
+        v-model="query"
+        placeholder="搜索导航 / AI 资源 / GitHub 用户，或跳转模块…"
+        allow-clear
+        size="large"
+      />
+      <div class="palette-list">
+        <div
+          v-for="(it, i) in filtered"
+          :key="i"
+          class="palette-item"
+          :class="{ active: i === active }"
+          @mouseenter="active = i"
+          @click="activate(it)"
+        >
+          <span class="pi-icon"><component :is="it.icon" /></span>
+          <span class="pi-title">{{ it.title }}</span>
+          <span v-if="it.sub" class="pi-sub">{{ it.sub }}</span>
         </div>
+        <a-empty v-if="!filtered.length" description="没有匹配结果" class="palette-empty" />
       </div>
     </div>
-  </transition>
+  </div>
 </template>
 
 <style scoped>
-.fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.palette :deep(.arco-input-wrapper) {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 16px 20px;
+}
+.palette :deep(.arco-input-wrapper .arco-input) { font-size: 16px; }
+.pi-icon { display: inline-flex; align-items: center; font-size: 16px; }
 </style>

@@ -1,25 +1,31 @@
 <script setup>
-// AI 资源台：六类数据（中转站/工具/Skills/VPN/服务器/教程）存远程 MongoDB。
-// 读公开、写需管理密码。本次重做为统一卡片网格 + 抽屉式编辑/详情，并接入全局 Toast / 确认弹窗 / 本地 AI 配置。
+// AI 资源台：数据存远程 MongoDB。读公开、写需管理密码。
+// 板块（顶部那排）由 /api/hub/boards 动态提供：内置 6 个 + 管理员自建。
+// 布局沿用：板块工具栏 + 卡片网格 + 编辑弹窗 / 教程详情弹窗 / 登录弹窗 / 板块管理抽屉。
+// 控件全部使用 Arco Design Vue。
 import { ref, computed, onMounted } from 'vue';
+import {
+  IconPlus, IconDownload, IconUpload, IconEdit, IconDelete, IconLaunch,
+  IconThumbUp, IconMenu, IconDragDotVertical, IconBulb,
+} from '@arco-design/web-vue/es/icon';
 import { marked } from 'marked';
 import { useSettings } from '~/lib/useSettings';
 import { useToast } from '~/lib/useToast';
-import { useConfirm } from '~/lib/useConfirm';
+import { useAdmin } from '~/lib/useAdmin';
+import { BOARD_ICON_KEYS, boardIcon } from '~/lib/boardIcons';
+import ShareButton from '~/components/ShareButton.vue';
+import draggable from 'vuedraggable';
 
 const { settings } = useSettings();
 const { toast } = useToast();
-const { confirm } = useConfirm();
+const { adminMode, adminHeaders, login, logout } = useAdmin();
 
-const SECTIONS = [
-  { id: 'stations', label: '🛰 中转站' },
-  { id: 'tools', label: '🧰 工具' },
-  { id: 'skills', label: '🧩 Skills' },
-  { id: 'vpns', label: '🔒 VPN' },
-  { id: 'servers', label: '⚡ AI 直连平台' },
-  { id: 'tutorials', label: '📚 教程' },
-];
+const boards = ref([]);
+const activeSection = ref('stations');
+const lists = ref({});
+const loading = ref(false);
 
+// 内置板块的专属表单；自定义板块用 GENERIC_FIELDS
 const FIELDS = {
   stations: [
     { key: 'name', label: '名称', required: true },
@@ -62,161 +68,107 @@ const FIELDS = {
   ],
   tutorials: [
     { key: 'title', label: '标题', required: true },
-    { key: 'category', label: '分类' },
-    { key: 'summary', label: '摘要' },
-    { key: 'tags', label: '标签（逗号分隔）', type: 'list' },
-    { key: 'content', label: '正文（Markdown）', type: 'textarea' },
-    { key: 'status', label: '状态', type: 'select', options: ['published', 'draft'] },
-    { key: 'sort', label: '排序', type: 'number' },
   ],
 };
+const GENERIC_FIELDS = [
+  { key: 'name', label: '名称', required: true },
+  { key: 'url', label: '链接' },
+  { key: 'tags', label: '标签（逗号分隔）', type: 'list' },
+  { key: 'detail', label: '详细步骤（每行一条）', type: 'lines' },
+  { key: 'desc', label: '描述' },
+  { key: 'sort', label: '排序', type: 'number' },
+];
+const fieldsOf = (coll) => FIELDS[coll] || GENERIC_FIELDS;
+const isBuiltin = (coll) => Object.prototype.hasOwnProperty.call(FIELDS, coll);
 
-const activeSection = ref('stations');
-const lists = ref({ stations: [], tools: [], skills: [], vpns: [], servers: [], tutorials: [] });
-const loading = ref(false);
-
-const adminMode = ref(false);
+const showLogin = ref(false);
 const pwdInput = ref('');
 const pwdError = ref('');
 const editing = ref(null);
 const form = ref({});
+const backupInput = ref(null);
 
 const detail = ref(null);
 const detailLoading = ref(false);
-
-const aiLoading = ref('');
-const aiOutput = ref('');
-
-// ===== AI 辅助录入（仅后台：所有 /api/ai/* 与 /api/tools/summarize 均需管理密码） =====
 const aiBusy = ref(false);
-function aiCfg() {
-  return settings.aiConfig.baseURL
+
+const currentBoard = computed(() => boards.value.find((b) => b.key === activeSection.value) || null);
+const currentList = computed(() => lists.value[activeSection.value] || []);
+
+const aiCfg = () =>
+  settings.aiConfig.baseURL
     ? { baseURL: settings.aiConfig.baseURL, apiKey: settings.aiConfig.apiKey, model: settings.aiConfig.model }
     : undefined;
-}
-// 按当前表单生成内容并回填（工具/Skills/VPN/AI直连平台/教程）
-async function aiFill() {
-  const { coll } = editing.value;
-  aiBusy.value = true;
-  try {
-    const res = await fetch('/api/ai/assist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-      body: JSON.stringify({ coll, fields: { ...form.value }, config: aiCfg() }),
-    });
-    const b = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
-    for (const [k, v] of Object.entries(b)) {
-      if (v === undefined || v === null) continue;
-      if (k === 'tags') form.value.tags = Array.isArray(v) ? v.join('，') : v;
-      else if (k === 'detail') form.value.detail = Array.isArray(v) ? v.join('\n') : v;
-      else form.value[k] = v;
-    }
-    toast('AI 已生成并回填，检查后保存', 'success');
-  } catch (e) {
-    errToast('AI 生成失败：', e);
-  } finally {
-    aiBusy.value = false;
-  }
-}
-// 教程编辑器内：润色 / 续写 / 生成摘要
-async function aiWrite(action) {
-  aiBusy.value = true;
-  try {
-    const res = await fetch('/api/tools/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-      body: JSON.stringify({ content: form.value.content || '', mode: action, config: aiCfg() }),
-    });
-    const b = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
-    if (action === 'summary') {
-      form.value.summary = (b.text || '').trim();
-      toast('摘要已生成并回填', 'success');
-    } else if (action === 'polish') {
-      form.value.content = b.text;
-      toast('润色完成', 'success');
-    } else {
-      form.value.content = `${(form.value.content || '').replace(/\s*$/, '')}\n\n${b.text}`;
-      toast('已续写并追加到正文末尾', 'success');
-    }
-  } catch (e) {
-    errToast('AI 操作失败：', e);
-  } finally {
-    aiBusy.value = false;
-  }
-}
-// 教程 Markdown 实时预览
-const previewHtml = computed(() => {
-  try {
-    return marked.parse(form.value.content || '');
-  } catch {
-    return '';
-  }
-});
 
-const currentList = computed(() => lists.value[activeSection.value] || []);
-const adminHeaders = () => ({ 'x-admin-password': sessionStorage.getItem('admin_pwd') || '' });
-
-// 操作失败反馈：就近 Toast（自动消失），超长报错只打控制台；页面横幅仅用于数据加载失败
 function errToast(prefix, e) {
   const m = String(e?.message || e || '未知错误');
   if (m.length > 200) console.error('[操作失败]', m);
   toast(prefix + m.slice(0, 200), 'error');
 }
 
+// ===================== 数据加载 =====================
+async function loadBoards() {
+  const list = await fetch('/api/hub/boards').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  boards.value = list;
+  if (!list.some((b) => b.key === activeSection.value)) {
+    activeSection.value = list[0]?.key || '';
+  }
+}
+
 async function loadAll() {
   loading.value = true;
   try {
+    await loadBoards();
     const results = await Promise.all(
-      SECTIONS.map((s) =>
-        fetch(`/api/hub/${s.id}`)
-          .then((r) => (r.ok ? r.json() : []))
-          .catch(() => []),
-      ),
+      boards.value.map((b) => fetch(`/api/hub/${b.key}`).then((r) => (r.ok ? r.json() : [])).catch(() => [])),
     );
-    SECTIONS.forEach((s, i) => (lists.value[s.id] = results[i]));
+    const next = {};
+    boards.value.forEach((b, i) => { next[b.key] = results[i]; });
+    lists.value = next;
   } finally {
     loading.value = false;
   }
 }
+onMounted(loadAll);
 
-async function login() {
+function openUrl(item) {
+  return item.siteURL || item.home || item.web || item.url || '';
+}
+function itemDesc(item) {
+  return item.desc || item.intro || item.summary || item.region || '';
+}
+function statusBadge(item) {
+  if (item.status === 'active' || item.status === 'published') return 'success';
+  if (item.status === 'draft') return 'warning';
+  return 'danger';
+}
+
+// ===================== 登录 =====================
+async function doLogin() {
   pwdError.value = '';
   try {
-    const res = await fetch('/api/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwdInput.value }),
-    });
-    if (!res.ok) {
-      const b = await res.json().catch(() => ({}));
-      throw new Error(b.message || `HTTP ${res.status}`);
-    }
-    sessionStorage.setItem('admin_pwd', pwdInput.value);
-    adminMode.value = true;
+    await login(pwdInput.value);
+    showLogin.value = false;
     pwdInput.value = '';
-    toast('已进入管理', 'success');
   } catch (e) {
     pwdError.value = e.message;
   }
 }
 
-function logout() {
-  sessionStorage.removeItem('admin_pwd');
-  adminMode.value = false;
-  toast('已退出管理', 'info');
-}
-
+// ===================== 条目 CRUD =====================
 function openCreate() {
   form.value = { status: activeSection.value === 'tutorials' ? 'published' : 'active', sort: 0 };
   editing.value = { coll: activeSection.value, doc: null };
 }
 
 async function openEdit(item) {
-  form.value = { ...item };
+  // 数组字段（tags 等）在表单里用「逗号分隔的字符串」编辑，保存时再拆回数组
+  const draft = { ...item };
+  for (const f of fieldsOf(activeSection.value)) {
+    if (f.type === 'list' && Array.isArray(draft[f.key])) draft[f.key] = draft[f.key].join('，');
+  }
+  form.value = draft;
   editing.value = { coll: activeSection.value, doc: item };
-  // 教程列表接口不带正文，编辑前先拉全文，避免保存时把正文覆盖为空
   if (activeSection.value === 'tutorials') {
     try {
       const res = await fetch(`/api/hub/tutorials/${item._id}`);
@@ -231,15 +183,10 @@ async function saveEdit() {
   if (typeof body.tags === 'string') body.tags = body.tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
   if (typeof body.detail === 'string') body.detail = body.detail.split('\n').filter(Boolean);
   const url = doc ? `/api/hub/${coll}/${doc._id}` : `/api/hub/${coll}`;
-  const res = await fetch(url, {
-    method: doc ? 'PUT' : 'POST',
-    headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(url, { method: doc ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders() }, body: JSON.stringify(body) });
   if (!res.ok) {
     const b = await res.json().catch(() => ({}));
-    errToast('保存失败：', new Error(b.message || `HTTP ${res.status}`));
-    return;
+    return errToast('保存失败：', new Error(b.message || `HTTP ${res.status}`));
   }
   editing.value = null;
   await loadAll();
@@ -247,23 +194,84 @@ async function saveEdit() {
 }
 
 async function remove(item) {
-  const ok = await confirm(`确定删除「${item.name || item.title}」？`, { danger: true, confirmText: '删除' });
-  if (!ok) return;
-  const res = await fetch(`/api/hub/${activeSection.value}/${item._id}`, {
-    method: 'DELETE',
-    headers: adminHeaders(),
-  });
+  const res = await fetch(`/api/hub/${activeSection.value}/${item._id}`, { method: 'DELETE', headers: adminHeaders() });
   if (!res.ok) {
     const b = await res.json().catch(() => ({}));
-    errToast('删除失败：', new Error(b.message || `HTTP ${res.status}`));
-    return;
+    return errToast('删除失败：', new Error(b.message || `HTTP ${res.status}`));
   }
   await loadAll();
   toast('已删除', 'success');
 }
 
+// ===================== 板块管理 =====================
+const showBoardMgr = ref(false);
+const boardForm = ref({ open: false, editing: null, key: '', name: '', icon: 'apps', sort: 0 });
+const boardSaving = ref(false);
+
+function openAddBoard() {
+  boardForm.value = { open: true, editing: null, key: '', name: '', icon: 'apps', sort: boards.value.length };
+}
+function openEditBoard(b) {
+  boardForm.value = { open: true, editing: b.key, key: b.key, name: b.name, icon: b.icon || 'apps', sort: b.sort };
+}
+
+async function saveBoard() {
+  const f = boardForm.value;
+  if (!f.name.trim()) return toast('板块名称不能为空', 'error');
+  boardSaving.value = true;
+  try {
+    const res = f.editing
+      ? await fetch(`/api/hub/boards/${encodeURIComponent(f.editing)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+          body: JSON.stringify({ name: f.name, icon: f.icon, sort: Number(f.sort) || 0 }),
+        })
+      : await fetch('/api/hub/boards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+          body: JSON.stringify({ name: f.name, icon: f.icon, sort: Number(f.sort) || 0 }),
+        });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
+    boardForm.value.open = false;
+    await loadAll();
+    toast(f.editing ? '板块已更新' : '已新增板块', 'success');
+  } catch (e) {
+    errToast('保存板块失败：', e);
+  } finally {
+    boardSaving.value = false;
+  }
+}
+
+async function deleteBoard(b) {
+  const res = await fetch(`/api/hub/boards/${encodeURIComponent(b.key)}`, { method: 'DELETE', headers: adminHeaders() });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return errToast('删除板块失败：', new Error(body.message || `HTTP ${res.status}`));
+  if (activeSection.value === b.key) activeSection.value = '';
+  await loadAll();
+  toast(`已删除板块${body.removedItems ? `（连同 ${body.removedItems} 条内容）` : ''}`, 'success');
+}
+
+// 拖拽排序后保存
+async function saveBoardOrder() {
+  const order = boards.value.map((b, i) => ({ key: b.key, sort: i }));
+  const res = await fetch('/api/hub/boards/reorder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+    body: JSON.stringify({ order }),
+  });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}));
+    errToast('保存板块顺序失败：', new Error(b.message || `HTTP ${res.status}`));
+    await loadBoards();
+    return;
+  }
+  toast('板块顺序已保存', 'success');
+}
+
+// ===================== 中转站 / 教程专属 =====================
 async function probeModels(item) {
-  aiLoading.value = item._id;
+  aiBusy.value = item._id;
   try {
     const res = await fetch(`/api/hub/stations/${item._id}/models`, { method: 'POST', headers: adminHeaders() });
     if (!res.ok) {
@@ -275,12 +283,12 @@ async function probeModels(item) {
   } catch (e) {
     errToast('拉取模型失败：', e);
   } finally {
-    aiLoading.value = '';
+    aiBusy.value = '';
   }
 }
 
 async function healthCheck(item) {
-  aiLoading.value = item._id;
+  aiBusy.value = item._id;
   try {
     const res = await fetch(`/api/hub/stations/${item._id}/health`, { method: 'POST' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -289,7 +297,7 @@ async function healthCheck(item) {
   } catch (e) {
     errToast('探活失败：', e);
   } finally {
-    aiLoading.value = '';
+    aiBusy.value = '';
   }
 }
 
@@ -316,40 +324,95 @@ async function likeTutorial() {
   }
 }
 
-async function aiAction(mode) {
-  if (!detail.value) return;
-  aiLoading.value = mode;
-  aiOutput.value = '';
+// ===================== AI 辅助 =====================
+async function aiFill() {
+  const { coll } = editing.value;
+  aiBusy.value = true;
+  try {
+    const res = await fetch('/api/ai/assist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({ coll, fields: { ...form.value }, config: aiCfg() }),
+    });
+    const b = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
+    for (const [k, v] of Object.entries(b)) {
+      if (v === undefined || v === null) continue;
+      if (k === 'tags') form.value.tags = Array.isArray(v) ? v.join('，') : v;
+      else if (k === 'detail') form.value.detail = Array.isArray(v) ? v.join('\n') : v;
+      else form.value[k] = v;
+    }
+    toast('AI 已生成并回填，检查后保存', 'success');
+  } catch (e) {
+    errToast('AI 生成失败：', e);
+  } finally {
+    aiBusy.value = false;
+  }
+}
+
+async function aiWrite(action) {
+  aiBusy.value = true;
   try {
     const res = await fetch('/api/tools/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-      body: JSON.stringify({
-        content: detail.value.content || detail.value.summary,
-        mode,
-        config: settings.aiConfig.baseURL
-          ? { baseURL: settings.aiConfig.baseURL, apiKey: settings.aiConfig.apiKey, model: settings.aiConfig.model }
-          : undefined,
-      }),
+      body: JSON.stringify({ content: form.value.content || '', mode: action, config: aiCfg() }),
     });
-    const b = await res.json();
+    const b = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
-    aiOutput.value = b.text;
+    if (action === 'summary') {
+      form.value.summary = (b.text || '').trim();
+      toast('摘要已生成并回填', 'success');
+    } else if (action === 'polish') {
+      form.value.content = b.text;
+      toast('润色完成', 'success');
+    } else {
+      form.value.content = `${(form.value.content || '').replace(/\s*$/, '')}\n\n${b.text}`;
+      toast('已续写并追加到正文末尾', 'success');
+    }
   } catch (e) {
     errToast('AI 操作失败：', e);
   } finally {
-    aiLoading.value = '';
+    aiBusy.value = false;
   }
 }
 
-async function applyAiOutput() {
-  if (!detail.value || !aiOutput.value) return;
-  form.value = { ...detail.value, content: aiOutput.value };
+const previewHtml = computed(() => {
+  try {
+    return marked.parse(form.value.content || '');
+  } catch {
+    return '';
+  }
+});
+
+async function aiAction(mode) {
+  if (!detail.value) return;
+  aiBusy.value = mode;
+  try {
+    const res = await fetch('/api/tools/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({ content: detail.value.content || detail.value.summary, mode, config: aiCfg() }),
+    });
+    const b = await res.json();
+    if (!res.ok) throw new Error(b.message || `HTTP ${res.status}`);
+    detail.value._aiOutput = b.text;
+  } catch (e) {
+    errToast('AI 操作失败：', e);
+  } finally {
+    aiBusy.value = '';
+  }
+}
+
+function applyAiOutput() {
+  if (!detail.value || !detail.value._aiOutput) return;
+  form.value = { ...detail.value, content: detail.value._aiOutput };
   editing.value = { coll: 'tutorials', doc: detail.value };
   detail.value = null;
   toast('已载入编辑器，保存后生效', 'info');
 }
 
+// ===================== 备份 / 分享 =====================
 async function exportBackup() {
   const res = await fetch('/api/hub/backup', { headers: adminHeaders() });
   if (!res.ok) return;
@@ -365,11 +428,7 @@ async function importBackup(ev) {
   const file = ev.target.files?.[0];
   if (!file) return;
   const text = await file.text();
-  const res = await fetch('/api/hub/backup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...adminHeaders() },
-    body: text,
-  });
+  const res = await fetch('/api/hub/backup', { method: 'POST', headers: { 'Content-Type': 'application/json', ...adminHeaders() }, body: text });
   if (res.ok) {
     await loadAll();
     toast('导入成功', 'success');
@@ -380,7 +439,6 @@ async function importBackup(ev) {
   ev.target.value = '';
 }
 
-// 分享载荷：统一取「标题 / 描述 / 链接」，refId 用 MongoDB 的 _id
 function sharePayload(item) {
   const coll = activeSection.value;
   return {
@@ -388,204 +446,378 @@ function sharePayload(item) {
     coll,
     refId: item._id,
     title: item.name || item.title || '未命名',
-    desc: item.desc || item.intro || item.summary || item.region || '',
-    url: item.siteURL || item.home || item.web || item.url || '',
-    badge: SECTIONS.find((s) => s.id === coll)?.label || '分享',
+    desc: itemDesc(item),
+    url: openUrl(item),
+    badge: currentBoard.value?.name || '分享',
   };
 }
-
-onMounted(loadAll);
 </script>
 
 <template>
-  <div>
-    <div class="toolbar">
-      <div class="cat-row" style="margin: 0">
-        <button
-          v-for="s in SECTIONS"
-          :key="s.id"
-          class="cat-chip"
-          :class="{ active: activeSection === s.id }"
-          @click="activeSection = s.id"
+  <div class="hub-wrap">
+    <div class="toolbar hub-toolbar">
+      <div class="cat-row">
+        <a-button
+          v-for="b in boards"
+          :key="b.key"
+          size="small"
+          shape="round"
+          :type="activeSection === b.key ? 'primary' : 'secondary'"
+          @click="activeSection = b.key"
         >
-          {{ s.label }}
-        </button>
+          <template #icon><component :is="boardIcon(b.icon)" /></template>
+          {{ b.name }}
+        </a-button>
       </div>
-      <span style="flex: 1"></span>
-      <template v-if="adminMode">
-        <button class="btn small" @click="openCreate">＋ 新增</button>
-        <button class="btn small" @click="exportBackup">⬇ 导出备份</button>
-        <label class="btn small" style="cursor: pointer">
-          ⬆ 导入备份<input type="file" accept=".json" style="display: none" @change="importBackup" />
-        </label>
-        <button class="btn small" @click="logout">退出管理</button>
-      </template>
-      <template v-else>
-        <input v-model="pwdInput" type="password" placeholder="管理密码" style="width: 140px" @keyup.enter="login" />
-        <button class="btn small primary" @click="login">进入管理</button>
-      </template>
-    </div>
-    <div v-if="pwdError" class="notice">{{ pwdError }}</div>
-
-    <!-- 中转站 -->
-    <div v-if="activeSection === 'stations'" class="hub-grid">
-      <div v-for="s in currentList" :key="s._id" class="hub-card shareable">
-        <ShareButton :payload="sharePayload(s)" :label="`分享 ${s.name}`" />
-        <h3>
-          <span class="status-dot" :class="s.status"></span>
-          {{ s.name }}
-          <span v-if="s.isGlobalAi" class="chip cf">全局AI</span>
-        </h3>
-        <div class="desc">{{ s.desc || s.baseURL }}</div>
-        <div class="models" v-if="s.models?.length">🧠 {{ s.models.slice(0, 6).join(' / ') }}{{ s.models.length > 6 ? ` 等 ${s.models.length} 个` : '' }}</div>
-        <div class="actions">
-          <a v-if="s.siteURL" class="btn small" :href="s.siteURL" target="_blank" rel="noopener">直达 ↗</a>
-          <button class="btn small" :disabled="aiLoading === s._id" @click="healthCheck(s)">
-            {{ aiLoading === s._id ? '…' : '探活' }}
-          </button>
-          <template v-if="adminMode">
-            <button class="btn small" :disabled="aiLoading === s._id" @click="probeModels(s)">拉模型</button>
-            <button class="btn small" @click="openEdit(s)">编辑</button>
-            <button class="btn small danger" @click="remove(s)">删</button>
-          </template>
-        </div>
+      <span class="spacer"></span>
+      <div class="admin-bar">
+        <template v-if="adminMode">
+          <a-button size="small" type="primary" @click="openCreate">
+            <template #icon><IconPlus /></template>
+            新增
+          </a-button>
+          <a-button size="small" @click="showBoardMgr = true">
+            <template #icon><IconMenu /></template>
+            管理板块
+          </a-button>
+          <a-button size="small" @click="exportBackup">
+            <template #icon><IconDownload /></template>
+            导出备份
+          </a-button>
+          <a-button size="small" @click="() => backupInput?.click()">
+            <template #icon><IconUpload /></template>
+            导入备份
+          </a-button>
+          <a-button size="small" @click="logout">退出管理</a-button>
+        </template>
+        <a-button v-else size="small" @click="showLogin = true">进入管理</a-button>
       </div>
     </div>
 
-    <!-- 通用卡片：工具/Skills/VPN/服务器 -->
-    <div v-else-if="activeSection !== 'tutorials'" class="hub-grid">
-      <div v-for="item in currentList" :key="item._id" class="hub-card shareable">
-        <ShareButton :payload="sharePayload(item)" :label="`分享 ${item.name}`" />
-        <h3>
-          <span class="status-dot" :class="item.status"></span>
-          {{ item.name }}
-        </h3>
-        <div class="desc">{{ item.desc || item.intro || item.summary || item.region || '' }}</div>
-        <div class="models" v-if="item.tags?.length">{{ item.tags.join(' · ') }}</div>
-        <div class="actions">
-          <a v-if="item.home || item.web || item.url" class="btn small" :href="item.home || item.web || item.url" target="_blank" rel="noopener">打开 ↗</a>
-          <template v-if="adminMode">
-            <button class="btn small" @click="openEdit(item)">编辑</button>
-            <button class="btn small danger" @click="remove(item)">删</button>
-          </template>
-        </div>
-      </div>
-    </div>
+    <div v-if="loading" class="loading"><a-spin /></div>
+    <a-empty v-else-if="!boards.length" description="还没有板块，进入管理后可新增" />
+    <a-empty v-else-if="!currentList.length" :description="`「${currentBoard?.name || ''}」暂无数据${adminMode ? '，点右上角「新增」创建' : ''}`" />
 
-    <!-- 教程 -->
     <div v-else class="hub-grid">
-      <div v-for="t in currentList" :key="t._id" class="hub-card shareable" @click="openTutorial(t)" style="cursor: pointer">
-        <ShareButton :payload="sharePayload(t)" :label="`分享 ${t.title}`" />
-        <h3>
-          <span class="status-dot" :class="t.status"></span>
-          {{ t.title }}
-        </h3>
-        <div class="desc">{{ t.summary }}</div>
-        <div class="models">{{ t.views || 0 }} 浏览 · {{ t.likes || 0 }} 点赞</div>
-        <div class="actions" v-if="adminMode" @click.stop>
-          <button class="btn small" @click="openEdit(t)">编辑</button>
-          <button class="btn small danger" @click="remove(t)">删</button>
+      <a-card
+        v-for="item in currentList"
+        :key="item._id"
+        size="small"
+        hoverable
+        class="hub-card"
+        :body-style="{ padding: '16px', height: '100%' }"
+      >
+        <div class="hub-head">
+          <a-badge :status="statusBadge(item)" />
+          <span class="hub-title">{{ item.name || item.title }}</span>
+          <a-tag v-if="item.isGlobalAi" size="small" color="orange">全局AI</a-tag>
         </div>
-      </div>
+        <div class="hub-desc">{{ itemDesc(item) }}</div>
+        <div v-if="item.models?.length" class="hub-meta">
+          {{ item.models.slice(0, 6).join(' / ') }}{{ item.models.length > 6 ? ` 等 ${item.models.length} 个` : '' }}
+        </div>
+        <div v-else-if="item.tags?.length" class="hub-meta">{{ item.tags.join(' · ') }}</div>
+        <div class="actions">
+          <ShareButton :payload="sharePayload(item)" :label="`分享 ${item.name || item.title}`" />
+          <div class="actions-right">
+            <a-button v-if="activeSection === 'tutorials'" size="mini" type="text" @click="openTutorial(item)">阅读</a-button>
+            <a-button v-if="openUrl(item)" size="mini" type="text" :href="openUrl(item)" target="_blank" rel="noopener">
+              <template #icon><IconLaunch /></template>
+              打开
+            </a-button>
+            <template v-if="item.status === 'active' || item.status === 'published' || activeSection !== 'stations'">
+              <a-button v-if="activeSection === 'stations'" size="mini" type="text" @click="healthCheck(item)">{{ aiBusy === item._id ? '…' : '探活' }}</a-button>
+              <a-button v-if="adminMode" size="mini" type="text" @click="openEdit(item)">
+                <template #icon><IconEdit /></template>
+                编辑
+              </a-button>
+              <a-popconfirm v-if="adminMode" content="确定删除？" @ok="remove(item)">
+                <a-button size="mini" type="text" status="danger">
+                  <template #icon><IconDelete /></template>
+                </a-button>
+              </a-popconfirm>
+            </template>
+            <a-button v-if="activeSection === 'stations' && adminMode" size="mini" type="text" @click="probeModels(item)">拉模型</a-button>
+          </div>
+        </div>
+      </a-card>
     </div>
 
-    <div v-if="loading" class="loading">正在从 MongoDB 读取…</div>
-    <div v-else-if="!currentList.length" class="empty">暂无数据{{ adminMode ? '，点右上角「新增」创建' : '' }}</div>
+    <!-- 条目编辑弹窗（教程走宽弹窗 + 双栏编辑器） -->
+    <a-modal
+      :visible="!!editing"
+      :width="editing?.coll === 'tutorials' ? 'min(1100px, 96vw)' : 'min(680px, 96vw)'"
+      :footer="false"
+      :title="(editing?.doc ? '编辑' : '新增') + (currentBoard?.name || '')"
+      :body-style="{ maxHeight: '76vh', overflow: 'auto' }"
+      unmount-on-close
+      @cancel="editing = null"
+    >
+      <template v-if="editing">
+        <!-- 通用表单（内置非教程板块 + 自定义板块） -->
+        <div v-if="editing.coll !== 'tutorials'" class="form-col">
+          <div v-for="f in fieldsOf(editing.coll)" :key="f.key" class="field-row">
+            <label>{{ f.label }}{{ f.required ? ' *' : '' }}</label>
+            <a-input v-if="!f.type" v-model="form[f.key]" :placeholder="f.placeholder" />
+            <a-input v-else-if="f.type === 'list'" v-model="form[f.key]" placeholder="多个值用逗号分隔" />
+            <a-textarea v-else-if="f.type === 'textarea'" v-model="form[f.key]" :auto-size="{ minRows: 8 }" />
+            <a-textarea v-else-if="f.type === 'lines'" v-model="form[f.key]" :auto-size="{ minRows: 4 }" placeholder="每行一条" />
+            <a-select v-else-if="f.type === 'select'" v-model="form[f.key]" :options="f.options.map((o) => ({ label: o, value: o }))" />
+            <a-input-number v-else-if="f.type === 'number'" v-model="form[f.key]" :min="0" style="width: 100%" />
+          </div>
+          <div class="ai-assist">
+            <a-button size="small" :loading="aiBusy" @click="aiFill">
+              <template #icon><IconBulb /></template>
+              {{ aiBusy ? 'AI 生成中…' : 'AI 生成' }}
+            </a-button>
+            <span class="ai-hint">根据名称/链接生成描述、标签等并回填（仅后台可用）</span>
+          </div>
+        </div>
 
-    <!-- 通用编辑弹窗：教程 = 宽幅 Markdown 编辑器，其余 = 普通表单 -->
-    <div v-if="editing" class="modal-mask" @click.self="editing = null">
-      <!-- 教程：左写右预览 + AI 辅助写作 -->
-      <div v-if="editing.coll === 'tutorials'" class="modal wide">
-        <h3>{{ editing.doc ? '编辑' : '新增' }}教程</h3>
-        <div class="field-row">
-          <label>标题 *</label>
-          <input v-model="form.title" type="text" placeholder="教程标题" />
-        </div>
-        <div class="field-row3">
-          <div>
-            <label>分类</label>
-            <input v-model="form.category" type="text" placeholder="如：Claude Code / 部署 / 逆向" />
+        <!-- 教程编辑器 -->
+        <div v-else class="form-col">
+          <div class="field-row">
+            <label>标题 *</label>
+            <a-input v-model="form.title" />
           </div>
-          <div>
-            <label>状态</label>
-            <select v-model="form.status">
-              <option value="published">published</option>
-              <option value="draft">draft</option>
-            </select>
+          <div class="field-row3">
+            <div class="col">
+              <label>分类</label>
+              <a-input v-model="form.category" />
+            </div>
+            <div class="col">
+              <label>状态</label>
+              <a-select v-model="form.status" :options="[{ label: 'published', value: 'published' }, { label: 'draft', value: 'draft' }]" />
+            </div>
+            <div class="col">
+              <label>排序</label>
+              <a-input-number v-model="form.sort" :min="0" style="width: 100%" />
+            </div>
           </div>
-          <div>
-            <label>排序</label>
-            <input v-model="form.sort" type="number" />
+          <div class="tut-toolbar">
+            <a-button size="small" :loading="aiBusy" @click="aiFill">
+              <template #icon><IconBulb /></template>
+              AI 生成全文
+            </a-button>
+            <a-button size="small" :loading="aiBusy" @click="aiWrite('polish')">润色</a-button>
+            <a-button size="small" :loading="aiBusy" @click="aiWrite('continue')">续写</a-button>
+            <a-button size="small" :loading="aiBusy" @click="aiWrite('summary')">生成摘要</a-button>
+          </div>
+          <div class="field-row">
+            <label>摘要</label>
+            <a-input v-model="form.summary" />
+          </div>
+          <div class="field-row">
+            <label>标签（逗号分隔）</label>
+            <a-input v-model="form.tags" />
+          </div>
+          <div class="tut-editor">
+            <a-textarea v-model="form.content" class="tut-input" placeholder="正文（Markdown）" />
+            <div class="tut-preview" v-html="previewHtml"></div>
           </div>
         </div>
-        <div class="tut-toolbar">
-          <button class="btn small" :disabled="aiBusy" @click="aiFill">✨ AI 生成全文</button>
-          <button class="btn small" :disabled="aiBusy" @click="aiWrite('polish')">润色</button>
-          <button class="btn small" :disabled="aiBusy" @click="aiWrite('continue')">续写</button>
-          <button class="btn small" :disabled="aiBusy" @click="aiWrite('summary')">生成摘要</button>
-          <span v-if="aiBusy" class="ai-hint">AI 处理中…</span>
-        </div>
-        <div class="field-row">
-          <label>摘要</label>
-          <input v-model="form.summary" type="text" placeholder="卡片上显示的一句话摘要，可用「生成摘要」自动回填" />
-        </div>
-        <div class="field-row">
-          <label>标签（逗号分隔）</label>
-          <input v-model="form.tags" type="text" placeholder="用逗号分隔" />
-        </div>
-        <div class="tut-editor">
-          <textarea v-model="form.content" class="tut-input" placeholder="Markdown 正文，右侧实时预览"></textarea>
-          <div class="tut-preview tutorial-content" v-html="previewHtml"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn" @click="editing = null">取消</button>
-          <button class="btn primary" @click="saveEdit">保存</button>
-        </div>
-      </div>
 
-      <!-- 其他集合：普通表单 + AI 生成回填 -->
-      <div v-else class="modal">
-        <h3>{{ editing.doc ? '编辑' : '新增' }}{{ SECTIONS.find((s) => s.id === editing.coll)?.label.slice(2) }}</h3>
-        <div v-for="f in FIELDS[editing.coll]" :key="f.key" class="field-row">
-          <label>{{ f.label }}{{ f.required ? ' *' : '' }}</label>
-          <textarea v-if="f.type === 'textarea'" v-model="form[f.key]" rows="12"></textarea>
-          <textarea v-else-if="f.type === 'lines'" v-model="form[f.key]" rows="4" placeholder="每行一条"></textarea>
-          <select v-else-if="f.type === 'select'" v-model="form[f.key]">
-            <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
-          </select>
-          <input v-else v-model="form[f.key]" :type="f.type === 'number' ? 'number' : 'text'" :placeholder="f.placeholder" />
-        </div>
-        <div class="ai-assist">
-          <button class="btn small" :disabled="aiBusy" @click="aiFill">
-            {{ aiBusy ? 'AI 生成中…' : '✨ AI 生成' }}
-          </button>
-          <span class="ai-hint">根据名称/链接生成描述、标签等并回填（仅后台可用；需在设置里配置 AI 或服务端 GlobalAi）</span>
-        </div>
         <div class="modal-footer">
-          <button class="btn" @click="editing = null">取消</button>
-          <button class="btn primary" @click="saveEdit">保存</button>
+          <a-button @click="editing = null">取消</a-button>
+          <a-button type="primary" @click="saveEdit">保存</a-button>
         </div>
-      </div>
-    </div>
+      </template>
+    </a-modal>
 
     <!-- 教程详情弹窗 -->
-    <div v-if="detail" class="modal-mask" @click.self="detail = null">
-      <div class="modal" style="width: min(860px, 100%)">
-        <h3>{{ detail.title }} <small style="color: var(--text-dim); font-weight: 400">{{ detail.views || 0 }} 浏览 · {{ detail.likes || 0 }} 点赞</small></h3>
-        <div class="tutorial-content" v-html="marked.parse(detail.content || detail.summary || '')"></div>
-        <div class="toolbar" style="margin-top: 12px">
-          <button class="btn small" @click="likeTutorial">👍 点赞</button>
+    <a-modal
+      :visible="!!detail"
+      :width="'min(760px, 96vw)'"
+      :footer="false"
+      :title="detail?.title"
+      :body-style="{ maxHeight: '76vh', overflow: 'auto' }"
+      unmount-on-close
+      @cancel="detail = null"
+    >
+      <template v-if="detail">
+        <div class="detail-meta">{{ detail.views || 0 }} 浏览 · {{ detail.likes || 0 }} 点赞</div>
+        <div v-if="detailLoading" class="loading"><a-spin /></div>
+        <div v-else class="tutorial-content" v-html="marked.parse(detail.content || detail.summary || '')"></div>
+        <div class="toolbar detail-actions">
+          <a-button size="small" @click="likeTutorial">
+            <template #icon><IconThumbUp /></template>
+            点赞
+          </a-button>
           <template v-if="adminMode">
-            <button class="btn small" :disabled="aiLoading === 'summary'" @click="aiAction('summary')">AI 摘要</button>
-            <button class="btn small" :disabled="aiLoading === 'polish'" @click="aiAction('polish')">AI 润色</button>
-            <button v-if="aiOutput" class="btn small" @click="applyAiOutput">把润色结果存回正文</button>
+            <a-button size="small" :loading="aiBusy === 'summary'" @click="aiAction('summary')">AI 摘要</a-button>
+            <a-button size="small" :loading="aiBusy === 'polish'" @click="aiAction('polish')">AI 润色</a-button>
+            <a-button v-if="detail._aiOutput" size="small" @click="applyAiOutput">把润色结果存回正文</a-button>
           </template>
         </div>
-        <div v-if="aiOutput" class="ai-box"><div class="ai-result">{{ aiOutput }}</div></div>
-        <div class="modal-footer">
-          <button class="btn" @click="detail = null">关闭</button>
+        <div v-if="detail._aiOutput" class="ai-box">
+          <div class="ai-result">{{ detail._aiOutput }}</div>
         </div>
+      </template>
+    </a-modal>
+
+    <!-- 板块管理抽屉（仅管理员可见入口） -->
+    <a-drawer :visible="showBoardMgr" :width="'min(420px, 92vw)'" placement="right" :footer="false" title="板块管理" unmount-on-close @cancel="showBoardMgr = false">
+      <div class="board-mgr">
+        <a-button type="primary" long @click="openAddBoard">
+          <template #icon><IconPlus /></template>
+          新增板块
+        </a-button>
+        <a-empty v-if="!boards.length" description="暂无板块" />
+        <template v-else>
+          <draggable
+            v-model="boards"
+            item-key="key"
+            handle=".drag-handle"
+            :animation="160"
+            ghost-class="board-ghost"
+            class="board-drag"
+            @end="saveBoardOrder"
+          >
+            <template #item="{ element: b }">
+              <div class="board-drag-item">
+                <span class="drag-handle" title="拖拽排序"><IconDragDotVertical /></span>
+                <span class="board-item-icon"><component :is="boardIcon(b.icon)" /></span>
+                <div class="board-item-text">
+                  <div class="board-item-name">{{ b.name }}</div>
+                  <div class="board-item-key">{{ b.builtin ? '内置板块 · ' : '' }}{{ b.key }}</div>
+                </div>
+                <div class="board-item-actions">
+                  <a-button size="mini" @click="openEditBoard(b)">
+                    <template #icon><IconEdit /></template>
+                    改名
+                  </a-button>
+                  <a-popconfirm v-if="!b.builtin" content="删除板块会连同其下所有条目一起删除，确定？" @ok="deleteBoard(b)">
+                    <a-button size="mini" status="danger">
+                      <template #icon><IconDelete /></template>
+                    </a-button>
+                  </a-popconfirm>
+                </div>
+              </div>
+            </template>
+          </draggable>
+        </template>
+        <p v-if="boards.length" class="board-hint">拖动 <IconDragDotVertical /> 手柄调整顺序，松手自动保存；内置板块不能删除，但可以改名和换图标。</p>
       </div>
-    </div>
+    </a-drawer>
+
+    <!-- 板块表单 -->
+    <a-modal :visible="boardForm.open" :width="'min(420px, 92vw)'" :footer="false" :title="boardForm.editing ? '编辑板块' : '新增板块'" unmount-on-close @cancel="boardForm.open = false">
+      <div class="field-row">
+        <label>板块名称</label>
+        <a-input v-model="boardForm.name" placeholder="如：数据集" />
+      </div>
+      <div class="field-row">
+        <label>图标</label>
+        <a-select v-model="boardForm.icon" :options="BOARD_ICON_KEYS.map((k) => ({ label: k, value: k }))">
+          <template #label="{ data }">
+            <span class="icon-opt"><component :is="boardIcon(data.value)" />{{ data.label }}</span>
+          </template>
+          <template #option="{ data }">
+            <span class="icon-opt"><component :is="boardIcon(data.value)" />{{ data.label }}</span>
+          </template>
+        </a-select>
+      </div>
+      <div class="field-row">
+        <label>排序（小在前）</label>
+        <a-input-number v-model="boardForm.sort" :min="0" style="width: 100%" />
+      </div>
+      <div class="modal-footer">
+        <a-button @click="boardForm.open = false">取消</a-button>
+        <a-button type="primary" :loading="boardSaving" @click="saveBoard">保存</a-button>
+      </div>
+    </a-modal>
+
+    <!-- 登录弹窗 -->
+    <a-modal :visible="showLogin" :width="'min(360px, 92vw)'" :footer="false" title="后台登录" :mask-closable="false" unmount-on-close @cancel="showLogin = false">
+      <div class="field-row">
+        <label>管理密码</label>
+        <a-input v-model="pwdInput" type="password" placeholder="请输入 ADMIN_PASSWORD" @keyup.enter="doLogin" />
+        <span v-if="pwdError" class="pwd-error">{{ pwdError }}</span>
+      </div>
+      <div class="modal-footer">
+        <a-button @click="showLogin = false">取消</a-button>
+        <a-button type="primary" @click="doLogin">登录</a-button>
+      </div>
+    </a-modal>
+
+    <input ref="backupInput" type="file" accept=".json" style="display: none" @change="importBackup" />
   </div>
 </template>
+
+<style scoped>
+.toolbar { margin-bottom: 16px; }
+.hub-toolbar .cat-row { margin-bottom: 0; }
+.admin-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: var(--gap); }
+.hub-card { display: flex; flex-direction: column; }
+.hub-card :deep(.arco-card-body) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.hub-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hub-title { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-head .arco-tag { margin-left: auto; }
+.hub-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; max-height: 60px; overflow: hidden; margin-top: 6px; }
+.hub-meta { font-size: 11px; color: var(--text-dim); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actions { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 10px; }
+.actions-right { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: flex-end; }
+.form-col { display: flex; flex-direction: column; }
+.ai-assist { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); flex-wrap: wrap; }
+.tut-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.detail-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+.detail-actions { margin-top: 12px; margin-bottom: 0; }
+.pwd-error { font-size: 12px; color: rgb(var(--danger-6)); margin-top: 4px; }
+.tut-input { min-height: 440px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.tut-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: rgb(var(--color-bg-2));
+  overflow: auto;
+  max-height: 560px;
+  min-height: 440px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.tut-preview :deep(pre) { background: #0d1428; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: auto; }
+.tut-preview :deep(code) { background: #0d1428; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+.tut-preview :deep(h1), .tut-preview :deep(h2), .tut-preview :deep(h3) { color: var(--accent); }
+.tut-preview :deep(img) { max-width: 100%; }
+.tutorial-content { background: rgb(var(--color-bg-1)); border: 1px solid var(--border); border-radius: 14px; padding: 16px 20px; font-size: 14px; line-height: 1.7; overflow: auto; }
+.tutorial-content :deep(pre) { background: #0d1428; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: auto; }
+.tutorial-content :deep(code) { background: #0d1428; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+.tutorial-content :deep(h1), .tutorial-content :deep(h2), .tutorial-content :deep(h3) { color: var(--accent); }
+.tutorial-content :deep(img) { max-width: 100%; }
+.ai-box { margin-top: 12px; background: rgb(var(--color-bg-2)); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+.ai-result { white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: var(--text); }
+
+/* 板块管理 */
+.board-mgr { display: flex; flex-direction: column; gap: 12px; }
+.board-drag { display: flex; flex-direction: column; gap: 8px; min-height: 8px; }
+.board-drag-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgb(var(--color-bg-2));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.board-drag-item:hover { border-color: var(--accent); }
+.board-ghost { opacity: 0.5; border-style: dashed; }
+.board-item-icon { display: inline-flex; align-items: center; font-size: 16px; color: var(--accent); flex: 0 0 auto; }
+.board-item-text { flex: 1; min-width: 0; }
+.board-item-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-item-key { font-size: 11px; color: var(--text-dim); }
+.board-item-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.drag-handle { cursor: grab; color: var(--text-dim); display: inline-flex; align-items: center; flex: 0 0 auto; }
+.drag-handle:active { cursor: grabbing; }
+.board-hint { font-size: 11px; color: var(--text-dim); line-height: 1.7; margin: 4px 0 0; }
+.board-hint :deep(svg) { vertical-align: -3px; }
+.icon-opt { display: inline-flex; align-items: center; gap: 6px; }
+
+@media (max-width: 900px) {
+  .tut-editor { grid-template-columns: 1fr; }
+  .tut-input { min-height: 260px; }
+  .tut-preview { min-height: 200px; }
+  .field-row3 { grid-template-columns: 1fr; }
+}
+</style>

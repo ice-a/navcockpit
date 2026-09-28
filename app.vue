@@ -1,8 +1,10 @@
 <script setup>
 // 全站壳：顶部标签导航 + 各功能板块 + 右上角全局设置 / 全局搜索。
+// 接入 Arco Design Vue：控件全部使用 Arco 组件，主题由 body[arco-theme] 驱动。
 // 分析/广告脚本按环境变量注入（留空 = 不注入），ID 在 nuxt.config / NUXT_PUBLIC_* 里配置。
 import { ref, watch, onMounted, onUnmounted } from 'vue';
-import { TABS } from '~/lib/tabs';
+import { IconSearch, IconSettings } from '@arco-design/web-vue/es/icon';
+import { TABS, TAB_ICONS } from '~/lib/tabs';
 import { useSettings } from '~/lib/useSettings';
 import { useTheme } from '~/lib/useTheme';
 import { useShare } from '~/lib/useShare';
@@ -15,8 +17,6 @@ import AvatarTab from '~/components/AvatarTab.vue';
 import GithubTab from '~/components/GithubTab.vue';
 import SettingsDrawer from '~/components/SettingsDrawer.vue';
 import CommandPalette from '~/components/CommandPalette.vue';
-import Toast from '~/components/Toast.vue';
-import ConfirmDialog from '~/components/ConfirmDialog.vue';
 import ShareDialog from '~/components/ShareDialog.vue';
 
 const { gaId, adsenseClient, clarityId, bingUetId } = useRuntimeConfig().public;
@@ -34,7 +34,8 @@ const { settings } = useSettings();
 const { showShare } = useShare();
 useTheme();
 
-const activeTab = ref(localStorage.getItem('activeTab') || settings.defaultTab || 'nav');
+// 初始标签：默认首页标签优先（默认 = AI 资源台）；设为「不强制」时回落到上次访问的标签
+const activeTab = ref(settings.defaultTab || localStorage.getItem('activeTab') || 'hub');
 watch(activeTab, (v) => localStorage.setItem('activeTab', v));
 
 // 默认首页标签：设置变更时若已设置，则跳转
@@ -146,42 +147,61 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 </script>
 
 <template>
-  <nav class="topbar">
-    <span class="logo">🧭 领航舱</span>
-    <div class="tabs">
-      <button v-for="t in TABS" :key="t.id" :class="{ active: activeTab === t.id }" @click="activeTab = t.id">
-        {{ t.icon }} {{ t.label }}
-      </button>
-    </div>
-    <span class="spacer"></span>
-    <div class="yiyan" :class="{ loading: yiyanLoading }" @click="fetchYiyan" title="点击换一句">
-      <span class="yiyan-text">{{ yiyan.text || '加载中…' }}</span>
-      <span v-if="yiyan.from && yiyan.from !== 'local'" class="yiyan-from">—— {{ yiyan.from }}</span>
-    </div>
-    <div class="top-actions">
-      <button class="icon-btn" title="全局搜索 (⌘K)" @click="paletteOpen = true">🔍</button>
-      <button class="icon-btn" title="全局设置" @click="settingsOpen = true">⚙</button>
-    </div>
-  </nav>
+  <div class="app-shell">
+    <nav class="topbar">
+      <span class="logo">🧭 领航舱</span>
+      <div class="tabs">
+        <a-button
+          v-for="t in TABS"
+          :key="t.id"
+          size="small"
+          shape="round"
+          :type="activeTab === t.id ? 'primary' : 'secondary'"
+          @click="activeTab = t.id"
+        >
+          <template #icon>
+            <component :is="TAB_ICONS[t.id]" />
+          </template>
+          {{ t.label }}
+        </a-button>
+      </div>
+      <span class="spacer"></span>
+      <a-tooltip v-if="yiyan.text" content="点击换一句" position="bottom">
+        <div class="yiyan" :class="{ loading: yiyanLoading }" @click="fetchYiyan">
+          <span class="yiyan-text">{{ yiyan.text }}</span>
+          <span v-if="yiyan.from && yiyan.from !== 'local'" class="yiyan-from">—— {{ yiyan.from }}</span>
+        </div>
+      </a-tooltip>
+      <div class="top-actions">
+        <a-button shape="circle" type="secondary" title="全局搜索 (⌘K)" @click="paletteOpen = true">
+          <template #icon><IconSearch /></template>
+        </a-button>
+        <a-button shape="circle" type="secondary" title="全局设置" @click="settingsOpen = true">
+          <template #icon><IconSettings /></template>
+        </a-button>
+      </div>
+    </nav>
 
-  <div class="app">
-    <DnsTab v-show="activeTab === 'dns'" />
-    <NavTab v-show="activeTab === 'nav'" />
-    <HotTab v-show="activeTab === 'hot'" />
-    <HubTab v-show="activeTab === 'hub'" />
-    <MarkdownTab v-show="activeTab === 'md'" />
-    <AvatarTab v-show="activeTab === 'avatar'" />
-    <GithubTab v-show="activeTab === 'github'" />
+    <div class="app">
+      <DnsTab v-show="activeTab === 'dns'" />
+      <NavTab v-show="activeTab === 'nav'" />
+      <HotTab v-show="activeTab === 'hot'" />
+      <HubTab v-show="activeTab === 'hub'" />
+      <MarkdownTab v-show="activeTab === 'md'" />
+      <AvatarTab v-show="activeTab === 'avatar'" />
+      <GithubTab v-show="activeTab === 'github'" />
+    </div>
+
+    <SettingsDrawer :open="settingsOpen" @close="settingsOpen = false" />
+    <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @navigate="onPaletteNavigate" @github-user="onPaletteGithub" />
+    <ShareDialog />
   </div>
-
-  <SettingsDrawer :open="settingsOpen" @close="settingsOpen = false" />
-  <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @navigate="onPaletteNavigate" @github-user="onPaletteGithub" />
-  <Toast />
-  <ConfirmDialog />
-  <ShareDialog />
 </template>
 
-<style>
+<style scoped>
+.app-shell {
+  min-height: 100vh;
+}
 .yiyan {
   display: flex;
   align-items: center;
@@ -212,13 +232,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
   flex: 0 0 auto;
   opacity: 0.7;
   font-style: italic;
-}
-@media (min-width: 1100px) {
-  .topbar { flex-wrap: nowrap; gap: 10px; padding-left: 18px; padding-right: 18px; }
-  .yiyan { flex: 0 1 300px; min-width: 0; }
-}
-@media (min-width: 1280px) {
-  .tabs { flex-wrap: nowrap; }
 }
 @media (max-width: 1100px) {
   .yiyan { display: none; }

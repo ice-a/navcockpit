@@ -1,7 +1,8 @@
 <script setup>
-// 分享弹窗：左边是海报预览（含丑头像 + 二维码），右边是链接与操作。
-// 由 lib/useShare.js 驱动；?share=<sid> 深链打开时是只读模式（展示别人的分享）。
+// 分享弹窗：左边海报预览（丑头像 + 二维码），右边链接与操作。由 lib/useShare.js 驱动。
+// 用 Arco Modal 承载，布局沿用左右双栏。
 import { ref, watch, nextTick } from 'vue';
+import { IconDownload, IconCopy, IconLaunch } from '@arco-design/web-vue/es/icon';
 import { useShare } from '~/lib/useShare';
 import { useToast } from '~/lib/useToast';
 import { renderSharePoster, downloadCanvas } from '~/lib/sharePoster';
@@ -10,8 +11,7 @@ const { shareState, closeShare } = useShare();
 const { toast } = useToast();
 
 const box = ref(null);
-const linkInput = ref(null);
-const poster = ref(null); // 最近一次渲染出来的 canvas（用 ref，按钮的 disabled 才会跟着变）
+const poster = ref(null);
 
 function draw() {
   if (!box.value || !shareState.doc) return;
@@ -24,13 +24,15 @@ watch(
   () => nextTick(draw),
 );
 
+function onLinkFocus(e) {
+  e.target?.select?.();
+}
+
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
     toast('链接已复制', 'success');
   } catch {
-    // 剪贴板权限被拒时退回「选中输入框让用户自己复制」
-    linkInput.value?.select();
     toast('复制失败，请手动复制输入框里的链接', 'error');
   }
 }
@@ -50,88 +52,73 @@ async function copyImage() {
 function fileName() {
   return `领航舱分享-${shareState.doc?.sid || 'poster'}.png`;
 }
-
 function openPage() {
   window.open(shareState.shareUrl, '_blank', 'noopener');
 }
 </script>
 
 <template>
-  <transition name="fade">
-    <div v-if="shareState.open" class="modal-mask" @click.self="closeShare">
-      <div class="share-box">
-        <div class="share-head">
-          <h3>{{ shareState.readonly ? '🔗 分享详情' : '🔗 分享这块内容' }}</h3>
-          <button class="icon-btn small" title="关闭" @click="closeShare">✕</button>
-        </div>
+  <a-modal
+    :visible="shareState.open"
+    :width="'min(760px, 96vw)'"
+    :footer="false"
+    :mask-closable="true"
+    unmount-on-close
+    :title="shareState.readonly ? '分享详情' : '分享这块内容'"
+    @cancel="closeShare"
+  >
+    <div class="share-body">
+      <div ref="box" class="share-poster">
+        <span v-if="shareState.loading || !shareState.doc" class="share-loading">正在生成…</span>
+      </div>
 
-        <div class="share-body">
-          <div ref="box" class="share-poster">
-            <div v-if="shareState.loading || !shareState.doc" class="share-placeholder">正在生成…</div>
-          </div>
+      <div class="share-side">
+        <p class="share-tip">
+          海报里的头像由内容自动派生，同一条内容永远是同一张脸；扫码或点链接都能打开这张分享卡。
+        </p>
 
-          <div class="share-side">
-            <p class="share-tip">
-              海报里的头像由内容自动派生，同一条内容永远是同一张脸；扫码或点链接都能打开这张分享卡。
-            </p>
-
-            <label class="field-row">
-              <span>分享链接</span>
-              <div class="share-link-row">
-                <input ref="linkInput" :value="shareState.shareUrl" readonly @focus="$event.target.select()" />
-                <button class="btn small" @click="copyText(shareState.shareUrl)">复制</button>
-              </div>
-            </label>
-
-            <div class="share-actions">
-              <button class="btn primary" :disabled="!poster || shareState.loading" @click="downloadCanvas(poster, fileName())">
-                ⬇ 下载图片
-              </button>
-              <button class="btn" :disabled="!poster || shareState.loading" @click="copyImage">🖼 复制图片</button>
-
-              <button class="btn" :disabled="!shareState.shareUrl" @click="openPage">↗ 打开分享页</button>
-            </div>
-
-            <div v-if="shareState.error" class="notice">
-              ⚠️ 链接没能存到服务端（{{ shareState.error }}），当前是本地临时分享：图片可用，但链接别人打不开。
-            </div>
-            <div v-else-if="shareState.readonly && shareState.doc" class="share-meta">
-              已被查看 {{ shareState.doc.views ?? 0 }} 次
-            </div>
+        <div class="field-row">
+          <label>分享链接</label>
+          <div class="share-link-row">
+            <a-input :model-value="shareState.shareUrl" readonly @focus="onLinkFocus" />
+            <a-button size="small" @click="copyText(shareState.shareUrl)">
+              <template #icon><IconCopy /></template>
+              复制
+            </a-button>
           </div>
         </div>
+
+        <a-space class="share-actions" wrap>
+          <a-button type="primary" :disabled="!poster || shareState.loading" @click="downloadCanvas(poster, fileName())">
+            <template #icon><IconDownload /></template>
+            下载图片
+          </a-button>
+          <a-button :disabled="!poster || shareState.loading" @click="copyImage">
+            <template #icon><IconCopy /></template>
+            复制图片
+          </a-button>
+          <a-button :disabled="!shareState.shareUrl" @click="openPage">
+            <template #icon><IconLaunch /></template>
+            打开分享页
+          </a-button>
+        </a-space>
+
+        <p v-if="shareState.error" class="share-warn">
+          链接没能存到服务端（{{ shareState.error }}），当前是本地临时分享：图片可用，但链接别人打不开。
+        </p>
+        <p v-else-if="shareState.readonly && shareState.doc" class="share-meta">
+          已被查看 {{ shareState.doc.views ?? 0 }} 次
+        </p>
       </div>
     </div>
-  </transition>
+  </a-modal>
 </template>
 
 <style scoped>
-.share-box {
-  width: min(760px, 96vw);
-  max-height: 90vh;
-  overflow: auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-2);
-}
-.share-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.share-head h3 {
-  margin: 0;
-  font-size: 16px;
-}
 .share-body {
   display: grid;
   grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
   gap: 20px;
-  padding: 20px;
 }
 .share-poster {
   display: flex;
@@ -139,17 +126,13 @@ function openPage() {
   justify-content: center;
   min-height: 200px;
 }
+.share-loading { color: var(--text-dim); font-size: 13px; }
 .share-poster :deep(canvas) {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: var(--radius-md);
+  border-radius: 10px;
   border: 1px solid var(--border);
-}
-.share-placeholder {
-  color: var(--text-dim);
-  font-size: 13px;
-  padding: 60px 0;
 }
 .share-side {
   display: flex;
@@ -167,21 +150,12 @@ function openPage() {
   display: flex;
   gap: 8px;
 }
-.share-link-row input {
+.share-link-row :deep(.arco-input-wrapper) {
   flex: 1;
   min-width: 0;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
 }
-.share-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.share-meta {
-  font-size: 12px;
-  color: var(--text-dim);
-}
+.share-warn { font-size: 12px; color: var(--yellow); margin: 0; line-height: 1.6; }
+.share-meta { font-size: 12px; color: var(--text-dim); margin: 0; }
 @media (max-width: 720px) {
   .share-body {
     grid-template-columns: 1fr;
@@ -190,13 +164,5 @@ function openPage() {
     max-width: 300px;
     margin: 0 auto;
   }
-}
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.18s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 </style>

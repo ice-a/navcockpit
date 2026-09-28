@@ -1,21 +1,26 @@
 // 删除：DELETE /api/hub/<coll>/<id>（需管理密码）
-import { createError } from 'h3';
+import { createError, getRouterParam } from 'h3';
 import { getDb } from '../../../utils/db';
-import { getModel, collToModel } from '../../../utils/models';
 import { requireAdmin } from '../../../utils/auth';
+import { resolveColl } from '../../../utils/boards';
 
 export default defineEventHandler(async (event) => {
   const coll = getRouterParam(event, 'coll');
   const id = getRouterParam(event, 'id');
-  const modelName = collToModel(coll);
-  if (!modelName) {
-    throw createError({ statusCode: 404, statusMessage: '未知集合' });
-  }
-  const Model = getModel(modelName);
   requireAdmin(event);
   await getDb();
+  const resolved = await resolveColl(coll);
+  if (!resolved) {
+    throw createError({ statusCode: 404, statusMessage: '未知板块' });
+  }
+  const { Model, filter } = resolved;
 
-  const doc = await Model.findByIdAndDelete(id);
+  let doc;
+  try {
+    doc = await Model.findOneAndDelete({ _id: id, ...filter });
+  } catch {
+    doc = null;
+  }
   if (!doc) throw createError({ statusCode: 404, statusMessage: '记录不存在' });
   return { ok: true };
 });

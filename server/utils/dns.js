@@ -1,4 +1,6 @@
-// 从原项目 shared/cloudflare.js 平移：Cloudflare API 交互 + 子域名探活 + GitHub 仓库拉取。
+// 从原项目 shared/cloudflare.js 平移：Cloudflare API 交互 + 子域名探活。
+// GitHub 仓库已拆到 utils/github.js + /api/github/repos（与 Cloudflare 解耦，
+// 不再随 DNS 看板一起返回，避免没配 CF_API_TOKEN 时把 GitHub 也一起拖挂）。
 // 在 Nitro（Node runtime）中运行，三个部署平台（Vercel/Cloudflare Pages/本地）共用同一份逻辑。
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
@@ -130,73 +132,6 @@ async function getChecks(hostnames) {
   return out;
 }
 
-const DEFAULT_GH_USER = 'ice-a';
-const GH_CACHE_TTL_MS = 10 * 60 * 1000;
-const repoCache = new Map();
-
-const GH_USER_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
-
-export function parseGithubUser(raw) {
-  const s = (raw || '').trim();
-  return GH_USER_RE.test(s) ? s : '';
-}
-
-async function getGithubRepos(opts, requestedUser) {
-  const username = requestedUser || (opts.GH_USERNAME || '').trim();
-  const token = opts.GH_TOKEN || '';
-  const mode = username ? 'user' : token ? 'own' : 'user';
-  const user = mode === 'user' ? username || DEFAULT_GH_USER : '';
-  const cacheKey = mode === 'own' ? ':own:' : `user:${user.toLowerCase()}`;
-
-  const hit = repoCache.get(cacheKey);
-  if (hit && Date.now() - hit.at < GH_CACHE_TTL_MS) return hit.data;
-
-  const headers = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': 'NavCockpit',
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const url =
-    mode === 'own'
-      ? 'https://api.github.com/user/repos?per_page=100&sort=pushed&visibility=all&affiliation=owner'
-      : `https://api.github.com/users/${encodeURIComponent(user)}/repos?per_page=100&sort=pushed`;
-
-  let result;
-  try {
-    const repos = [];
-    for (let page = 1; page <= 5; page++) {
-      const res = await fetch(`${url}&page=${page}`, { headers });
-      if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}${res.status === 403 ? '（可能触发限流，请稍后再试或配置 GH_TOKEN）' : ''}`);
-      const list = await res.json();
-      repos.push(
-        ...list.map((r) => ({
-          name: r.name,
-          fullName: r.full_name,
-          private: r.private,
-          url: r.html_url,
-          description: r.description || '',
-          language: r.language || '',
-          stars: r.stargazers_count,
-          forks: r.forks_count,
-          homepage: r.homepage || '',
-          archived: r.archived,
-          pushedAt: r.pushed_at,
-        })),
-      );
-      if (list.length < 100) break;
-    }
-    repos.sort((a, b) => b.stars - a.stars || a.name.localeCompare(b.name));
-    result = { source: mode, user: mode === 'own' ? '' : user, repos };
-  } catch (e) {
-    result = { source: mode, user, error: e.message, repos: [] };
-    repoCache.set(cacheKey, { data: result, at: Date.now() - GH_CACHE_TTL_MS + 2 * 60 * 1000 });
-    return result;
-  }
-  repoCache.set(cacheKey, { data: result, at: Date.now() });
-  return result;
-}
-
 export async function getDnsDashboard(opts = {}) {
   const token = opts.CF_API_TOKEN;
   if (!token) throw new Error('缺少 CF_API_TOKEN 环境变量');
@@ -209,28 +144,20 @@ export async function getDnsDashboard(opts = {}) {
       )
     : allZones;
 
-  const [data, repos] = await Promise.all([
-    Promise.all(
-      zones.map(async (zone) => {
-        const records = await cfFetchAll(token, `/zones/${zone.id}/dns_records`);
-        return {
-          id: zone.id,
-          name: zone.name,
-          records: records.map((r) => ({
-            type: r.type,
-            name: r.name,
-            proxied: r.proxied,
-          })),
-        };
-      }),
-    ),
-    getGithubRepos(opts, opts.githubUser).catch((e) => ({
-      source: 'user',
-      user: '',
-      error: e.message,
-      repos: [],
-    })),
-  ]);
+  const data = await Promise.all(
+    zones.map(async (zone) => {
+      const records = await cfFetchAll(token, `/zones/${zone.id}/dns_records`);
+      return {
+        id: zone.id,
+        name: zone.name,
+        records: records.map((r) => ({
+          type: r.type,
+          name: r.name,
+          proxied: r.proxied,
+        })),
+      };
+    }),
+  );
 
   const hostnames = new Set();
   for (const zone of data) {
@@ -240,5 +167,5 @@ export async function getDnsDashboard(opts = {}) {
   }
   const checks = await getChecks([...hostnames]);
 
-  return { updatedAt: new Date().toISOString(), zones: data, checks, github: repos };
+  return { updatedAt: new Date().toISOString(), zones: data, checks };
 }

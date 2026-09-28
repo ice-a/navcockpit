@@ -1,15 +1,15 @@
 <script setup>
-// 随机丑头像生成器。支持双引擎切换：
-//  - A：GordenSun/uglyAvatar（有机「沸腾线」风格，默认）
-//  - B：自带「方块怪」风格（lib/uglyavatar2.js）
-// 两引擎 API 一致（generateAvatar / renderAvatar / SPECIES），seed 可复现、可导出 1024×1024 PNG。
+// 随机丑头像生成器（双/三引擎）。布局沿用：工具栏引擎分段 + 画布 + 控制区。
+// 控件全部使用 Arco Design Vue，生成逻辑不变。
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { IconSwap, IconPause, IconPlayArrow, IconDownload } from '@arco-design/web-vue/es/icon';
 import { AvatarKit2 as KitA } from '~/lib/uglyavatar';
 import { AvatarKit2 as KitB } from '~/lib/uglyavatar2';
 import { AvatarKit2 as KitC } from '~/lib/uglyavatar-txstc55';
+import ShareButton from '~/components/ShareButton.vue';
 
 const canvas = ref(null);
-const engine = ref('A'); // A = GordenSun, B = 方块怪, C = txstc55
+const engine = ref('A');
 const kit = computed(() => (engine.value === 'A' ? KitA : engine.value === 'B' ? KitB : KitC));
 
 const species = ref('random');
@@ -17,14 +17,21 @@ const seedText = ref('');
 const bgColor = ref('#151b2e');
 const animating = ref(true);
 
-const av = ref(null); // 当前头像数据（用 ref，分享载荷才能随「随机一张」更新）
+const av = ref(null);
 let rafId = null;
 let ctx = null;
 
 const speciesOptions = computed(() => [
-  { id: 'random', name: '🎲 随机物种' },
-  ...kit.value.SPECIES.filter((s) => s.id !== 'random').map((s) => ({ id: s.id, name: s.cn || s.id })),
+  { label: '🎲 随机物种', value: 'random' },
+  ...kit.value.SPECIES.filter((s) => s.id !== 'random').map((s) => ({ label: s.cn || s.id, value: s.id })),
 ]);
+
+const bgOptions = [
+  { label: '深色', value: '#151b2e' },
+  { label: '白色', value: '#ffffff' },
+  { label: '米黄', value: '#f5e6ca' },
+  { label: '透明', value: 'transparent' },
+];
 
 function generate() {
   const opts = {};
@@ -42,9 +49,7 @@ function generate() {
 
 function redraw(t = performance.now() / 1000) {
   if (!ctx || !av.value) return;
-  kit.value.renderAvatar(ctx, av.value, t, 320, {
-    bgColor: bgColor.value === 'transparent' ? undefined : bgColor.value,
-  });
+  kit.value.renderAvatar(ctx, av.value, t, 320, { bgColor: bgColor.value === 'transparent' ? undefined : bgColor.value });
 }
 
 function loop() {
@@ -74,7 +79,6 @@ function download() {
 }
 
 onMounted(() => {
-  // 支持 ?avatarEngine=A/B/C 深链直达指定引擎
   const e = (new URLSearchParams(location.search).get('avatarEngine') || '').toUpperCase();
   if (e === 'A' || e === 'B' || e === 'C') engine.value = e;
   ctx = canvas.value.getContext('2d');
@@ -82,9 +86,8 @@ onMounted(() => {
   loop();
 });
 
-// 分享当前这张头像：把引擎/物种/seed 一起存进分享快照，别人看到的就是同一张脸
 const sharePayload = computed(() => {
-  const name = speciesOptions.value.find((s) => s.id === species.value)?.name || species.value;
+  const name = speciesOptions.value.find((s) => s.value === species.value)?.label || species.value;
   return {
     type: 'avatar',
     title: av.value ? '丑头像 #' + av.value.seed : '丑头像',
@@ -100,16 +103,16 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId));
 
 <template>
   <div>
-    <div class="toolbar" style="flex-wrap: wrap">
-      <span style="font-size: 13px; color: var(--text-dim)">引擎：</span>
-      <div class="seg">
-        <button :class="{ active: engine === 'A' }" @click="engine = 'A'; generate()">GordenSun 有机风</button>
-        <button :class="{ active: engine === 'B' }" @click="engine = 'B'; generate()">方块怪风</button>
-        <button :class="{ active: engine === 'C' }" @click="engine = 'C'; generate()">txstc55 脸谱</button>
-      </div>
+    <div class="toolbar">
+      <span>引擎：</span>
+      <a-radio-group v-model="engine" type="button" size="small" @change="generate">
+        <a-radio value="A">GordenSun 有机风</a-radio>
+        <a-radio value="B">方块怪风</a-radio>
+        <a-radio value="C">txstc55 脸谱</a-radio>
+      </a-radio-group>
     </div>
 
-    <h2 class="zone">🎨 个性头像 <small>seed 可复现 · 可导出 1024×1024 PNG</small></h2>
+    <h2 class="zone">个性头像 <small>seed 可复现 · 可导出 1024×1024 PNG</small></h2>
 
     <div class="avatar-wrap">
       <div class="avatar-canvas-box">
@@ -118,44 +121,52 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId));
 
       <div class="avatar-controls">
         <div class="row">
-          <label style="font-size: 13px; color: var(--text-dim)">物种/风格</label>
-          <select v-model="species" @change="generate">
-            <option v-for="s in speciesOptions" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
+          <label>物种/风格</label>
+          <a-select v-model="species" class="ctl-flex" :options="speciesOptions" @change="generate" />
         </div>
         <div class="row">
-          <label style="font-size: 13px; color: var(--text-dim)">Seed</label>
-          <input v-model="seedText" type="text" placeholder="留空随机" @keyup.enter="generate" />
-          <button class="btn small" @click="generate">按 Seed 生成</button>
+          <label>Seed</label>
+          <a-input v-model="seedText" class="ctl-flex" placeholder="留空随机" @keyup.enter="generate" />
+          <a-button size="small" @click="generate">按 Seed 生成</a-button>
         </div>
         <div class="row">
-          <label style="font-size: 13px; color: var(--text-dim)">背景</label>
-          <select v-model="bgColor">
-            <option value="#151b2e">深色</option>
-            <option value="#ffffff">白色</option>
-            <option value="#f5e6ca">米黄</option>
-            <option value="transparent">透明</option>
-          </select>
+          <label>背景</label>
+          <a-select v-model="bgColor" class="ctl-flex" :options="bgOptions" />
         </div>
         <div class="row">
-          <button class="btn primary" @click="regenerate">🎲 随机一张</button>
-          <button class="btn" @click="animating = !animating">
-            {{ animating ? '⏸ 暂停动画' : '▶️ 播放动画' }}
-          </button>
-          <button class="btn" @click="download">⬇️ 下载 PNG</button>
+          <a-button type="primary" @click="regenerate">
+            <template #icon><IconSwap /></template>
+            随机一张
+          </a-button>
+          <a-button @click="animating = !animating">
+            <template #icon>
+              <IconPause v-if="animating" />
+              <IconPlayArrow v-else />
+            </template>
+            {{ animating ? '暂停动画' : '播放动画' }}
+          </a-button>
+          <a-button @click="download">
+            <template #icon><IconDownload /></template>
+            下载 PNG
+          </a-button>
           <ShareButton :payload="sharePayload" inline label="分享这张头像" />
         </div>
-        <p style="font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 4px 0 0">
+        <p class="avatar-tip">
           同一个 Seed 永远生成同一张头像，可以收藏喜欢的 Seed。
           默认引擎来自
-          <a href="https://github.com/GordenSun/uglyAvatar" target="_blank" rel="noopener" style="color: var(--accent)"
-            >GordenSun/uglyAvatar</a
-          >；「方块怪风」为自带第二套生成器；「txstc55 脸谱」移植自
-          <a href="https://github.com/txstc55/ugly-avatar" target="_blank" rel="noopener" style="color: var(--accent)"
-            >txstc55/ugly-avatar</a
-          >，脸型/眼/嘴/发丝全随机。
+          <a href="https://github.com/GordenSun/uglyAvatar" target="_blank" rel="noopener">GordenSun/uglyAvatar</a>；
+          「方块怪风」为自带第二套生成器；「txstc55 脸谱」移植自
+          <a href="https://github.com/txstc55/ugly-avatar" target="_blank" rel="noopener">txstc55/ugly-avatar</a>。
         </p>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.avatar-controls .row { align-items: center; }
+.avatar-controls label { font-size: 13px; color: var(--text-dim); flex: 0 0 64px; }
+.avatar-controls .ctl-flex { flex: 1; min-width: 0; }
+.avatar-tip { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 4px 0 0; }
+.avatar-tip a { color: var(--accent); }
+</style>

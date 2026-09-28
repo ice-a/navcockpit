@@ -6,12 +6,12 @@ Vue 3 + Nuxt 3 单体应用：前端页面与 server/api 路由（Nitro）在同
 | 板块 | 数据来源 | 说明 |
 | --- | --- | --- |
 | 🌐 Cloudflare DNS | 原项目 | 自动读取 CF 托管网域的 DNS 记录 + 探活 |
-| 🧭 网站导航 | [ice-a/nav_devops](https://github.com/ice-a/nav_devops) | 525 条链接，55 个分类归为 8 个大类，支持二次细分 + 搜索 |
+| 🧭 网站导航 | [ice-a/nav_devops](https://github.com/ice-a/nav_devops) | 424 条链接（去重），55 个分类归为 9 个大类，支持二次细分 + 搜索 |
 | 🔥 热榜 | [ice-a/newsnow](https://github.com/ice-a/newsnow) | 服务端抓取：知乎/微博/百度/B站/GitHub/HN/V2EX/掘金/Product Hunt，带缓存 |
 | 🤖 AI 资源台 | [ice-a/forword-api-record](https://github.com/ice-a/forword-api-record) | 中转站/工具/Skills/VPN/服务器/教程，**存远程 MongoDB**，管理密码鉴权 |
 | 📝 文章转 MD | [ice-a/html_to_markdown_by_ai](https://github.com/ice-a/html_to_markdown_by_ai) | 服务端抓正文 + 图片转存图床 + Turndown + AI 总结 |
 | 🎨 丑头像 | [GordenSun/uglyAvatar](https://github.com/GordenSun/uglyAvatar) | Canvas 引擎、seed 可复现、4 种物种、1024px PNG 导出 |
-| 📦 GitHub | 原项目 | 用户公开仓库墙 |
+| 📦 GitHub | 原项目 | 拉取用户的**全部公开仓库**，按最近推送时间排序，支持关键词搜索（`/api/github/repos`，独立于 Cloudflare） |
 
 另有：Google AdSense 广告位、Google Analytics 4、Microsoft Clarity（Bing 家族分析）、Bing UET 统计。
 
@@ -63,3 +63,18 @@ AdSense 广告单元 ID 需在 `components/AdSlot.vue` 使用处传 `slot-id`。
 - ~~HTML 抓取 CORS 限制~~ → 服务端抓取 + 图床转存 ✅
 - AI 总结需要 Key：页面现填（存 localStorage，仅随请求发送）或服务端配置 `GLOBAL_AI_*`
 - Vercel Cron 定时测活未实现，探活为打开页面时手动/自动触发
+
+## 网站导航：分类后台（新增 / 改名 / 删除 / 排序）
+
+网站导航的分类与链接已迁到 MongoDB（集合 `NavCategory` / `NavLink`），可在后台管理：
+
+- **数据初始化**：进入「网站导航」→ 点右上角「进入管理」（密码为 `ADMIN_PASSWORD`）→「导入 link.json」，
+  一键把原 `public/link.json` 的 55 个分类、424 条链接（按 url+name 去重）迁入库（幂等，可重复执行）。
+- **新增分类**：后台「＋ 分类」填写展示名 / 所属大类 / 图标 / 排序。
+- **改名分类**：后台「管理分类」→「改名」，仅改展示名，`key` 不变，链接仍按 `key` 关联不会断链。
+- **删除分类**：删除后其下链接归入「未分类」。
+- **链接管理**：后台「＋ 链接」可新增；每张卡片右上「编辑 / 删」可改归属分类、描述等。
+
+接口：`GET/POST /api/nav/categories`、`PUT/DELETE /api/nav/categories/:key`、
+`GET/POST /api/nav/links`、`PUT/DELETE /api/nav/links/:id`、`POST /api/nav/seed`。
+写操作均复用 `x-admin-password` 鉴权（与 AI 资源台同一套 `ADMIN_PASSWORD`）。

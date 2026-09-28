@@ -11,7 +11,12 @@ export default defineNuxtConfig({
     appManifest: false,
   },
 
-  css: ['~/assets/css/main.css'],
+  // 顺序即加载顺序：先 Arco 基础样式，再覆盖主题 token，最后是布局骨架
+  css: [
+    '@arco-design/web-vue/dist/arco.css',
+    '~/assets/css/arco-theme.css',
+    '~/assets/css/main.css',
+  ],
 
   runtimeConfig: {
     // ===== 分析/广告（公开配置，前端可读；留空则不注入对应脚本）=====

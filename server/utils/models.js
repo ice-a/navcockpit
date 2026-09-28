@@ -106,6 +106,34 @@ const schemas = {
     },
     { timestamps: true },
   ),
+  // 网站导航分类（后台可增删改）。key 为稳定标识（与链接 catelog 对应），
+  // name 为可改的展示名；aliases 存放历史 catelog 值，匹配链接时一并纳入。
+  NavCategory: new Schema(
+    {
+      key: { type: String, required: true, unique: true, index: true }, // 稳定 id
+      name: { type: String, required: true }, // 展示名（可改名）
+      group: { type: String, default: '其他' }, // 大类
+      icon: { type: String, default: '' },
+      sort: { type: Number, default: 0 },
+      status: { type: String, default: 'active' }, // active | inactive
+      aliases: { type: [String], default: [] }, // 历史 catelog 值
+    },
+    { timestamps: true },
+  ),
+  // 网站导航链接（原 public/link.json，迁到 MongoDB 便于后台增删改）
+  NavLink: new Schema(
+    {
+      name: { type: String, required: true },
+      url: { type: String, required: true },
+      catelog: { type: String, default: '' }, // 对应 NavCategory.key
+      group: { type: String, default: '' }, // 冗余存大类，便于列表筛选
+      desc: { type: String, default: '' },
+      sort: { type: Number, default: 0 },
+      status: { type: String, default: 'active' }, // active | inactive
+    },
+    { timestamps: true },
+  ),
+
   // 分享快照：每条分享一个随机 sid，链接形如 /?share=<sid>。
   // 存的是快照（标题/描述/链接/头像参数），源记录被删后分享页仍可访问。
   Share: new Schema(
@@ -127,6 +155,34 @@ const schemas = {
     },
     { timestamps: true },
   ),
+
+  // AI 资源台的「板块」（顶部那排：中转站 / 工具 / Skills / …，后台可新增、改名、排序、删除）。
+  // key 是稳定标识：内置板块的 key 同时也是 URL 里的集合名（stations / tools / …）；
+  // builtin=true 的板块数据仍存在各自独立的集合里，不能删除。
+  HubBoard: new Schema(
+    {
+      key: { type: String, required: true, unique: true, index: true },
+      name: { type: String, required: true }, // 展示名（可改名）
+      icon: { type: String, default: '' }, // 前端图标键（cloud / code / …）
+      sort: { type: Number, default: 0 },
+      status: { type: String, default: 'active' }, // active | inactive
+      builtin: { type: Boolean, default: false },
+    },
+    { timestamps: true },
+  ),
+  // 自定义板块的通用条目（内置板块走各自的模型，不进这里）
+  HubItem: new Schema(
+    {
+      board: { type: String, required: true, index: true }, // 对应 HubBoard.key
+      name: { type: String, required: true },
+      url: { type: String, default: '' },
+      tags: { type: [String], default: [] },
+      install: { type: String, default: '' },
+      detail: { type: [String], default: [] },
+      ...base,
+    },
+    { timestamps: true },
+  ),
 };
 
 export function getModel(name) {
@@ -135,6 +191,9 @@ export function getModel(name) {
   // 防止 serverless 热重载重复注册
   return mongoose.models[name] || mongoose.model(name, schema);
 }
+
+// 导航分类 / 链接集合名（后台 CRUD 用）
+export const NAV_MODELS = ['NavCategory', 'NavLink'];
 
 // 通用 CRUD 开放的集合（GlobalAi 含密钥，只能通过服务端内部读取，不走通用路由）
 export const HUB_COLLECTIONS = ['Station', 'Tool', 'Skill', 'Vpn', 'Server', 'Tutorial'];
@@ -151,4 +210,19 @@ const COLL_MODEL_MAP = {
 
 export function collToModel(coll) {
   return COLL_MODEL_MAP[coll] || null;
+}
+
+// AI 资源台的 6 个内置板块（首次请求 /api/hub/boards 时幂等写入 HubBoard 集合）。
+// icon 是前端图标键，映射表见 components/HubTab.vue。
+export const BUILTIN_BOARDS = [
+  { key: 'stations', name: '中转站', icon: 'cloud', sort: 0 },
+  { key: 'tools', name: '工具', icon: 'code', sort: 1 },
+  { key: 'skills', name: 'Skills', icon: 'apps', sort: 2 },
+  { key: 'vpns', name: 'VPN', icon: 'safe', sort: 3 },
+  { key: 'servers', name: 'AI 直连平台', icon: 'thunderbolt', sort: 4 },
+  { key: 'tutorials', name: '教程', icon: 'file', sort: 5 },
+];
+
+export function isBuiltinBoard(key) {
+  return BUILTIN_BOARDS.some((b) => b.key === key);
 }

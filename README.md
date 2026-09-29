@@ -11,7 +11,7 @@ Vue 3 + Nuxt 3 单体应用：前端页面与 server/api 路由（Nitro）在同
 | 🤖 AI 资源台 | [ice-a/forword-api-record](https://github.com/ice-a/forword-api-record) | 中转站/工具/Skills/VPN/服务器/教程，**存远程 MongoDB**，管理密码鉴权 |
 | 📝 文章转 MD | [ice-a/html_to_markdown_by_ai](https://github.com/ice-a/html_to_markdown_by_ai) | 服务端抓正文 + 图片转存图床 + Turndown + AI 总结 |
 | 🎨 丑头像 | [GordenSun/uglyAvatar](https://github.com/GordenSun/uglyAvatar) | Canvas 引擎、seed 可复现、4 种物种、1024px PNG 导出 |
-| 📦 GitHub | 原项目 | 拉取用户的**全部公开仓库**，按最近推送时间排序，支持关键词搜索（`/api/github/repos`，独立于 Cloudflare） |
+| 📦 GitHub | 原项目 | 拉取用户的**全部公开仓库**，按最近推送时间排序（`/api/github/repos`）；另有 **GitHub 全站仓库搜索**（`/api/github/search`），页内可切换「当前用户 / GitHub 全站」两种搜索 |
 
 另有：Google AdSense 广告位、Google Analytics 4、Microsoft Clarity（Bing 家族分析）、Bing UET 统计。
 

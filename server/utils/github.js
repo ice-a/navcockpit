@@ -9,8 +9,14 @@ const PER_PAGE = 100;
 const GH_MAX_PAGES = 10; // 最多 1000 个仓库，防止超大户把分页打满
 const GH_CACHE_TTL_MS = 10 * 60 * 1000;
 
+// GitHub 全站搜索：未登录时限流很紧（约 10 次/分钟），给结果加短缓存并限制单页大小
+const GH_SEARCH_PER_PAGE = 30;
+const GH_SEARCH_MAX_PER_PAGE = 100;
+const GH_SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+
 const repoCache = new Map();
 const profileCache = new Map();
+const searchCache = new Map();
 
 export function parseGithubUser(raw) {
   const s = (raw || '').trim();
@@ -30,6 +36,7 @@ function mapRepo(r) {
   return {
     name: r.name,
     fullName: r.full_name,
+    owner: (r.owner && r.owner.login) || '',
     private: Boolean(r.private),
     fork: Boolean(r.fork),
     archived: Boolean(r.archived),
@@ -148,6 +155,46 @@ export function filterRepos(repos, keyword) {
     const hay = `${r.name} ${r.fullName} ${r.description} ${r.language} ${(r.topics || []).join(' ')}`.toLowerCase();
     return parts.every((p) => hay.includes(p));
   });
+}
+
+// GitHub 全站仓库搜索（/search/repositories），按相关度排序。
+// 返回：{ q, total, page, perPage, incomplete, items[] }，失败时带 error 且 items 为空。
+export async function searchGithubRepos({ token = '', q = '', page = 1, perPage = GH_SEARCH_PER_PAGE } = {}) {
+  const query = String(q || '').trim();
+  const pg = Math.max(Number(page) || 1, 1);
+  const size = Math.min(Math.max(Number(perPage) || GH_SEARCH_PER_PAGE, 1), GH_SEARCH_MAX_PER_PAGE);
+  if (!query) return { q: '', total: 0, page: pg, perPage: size, incomplete: false, items: [], error: '' };
+
+  const cacheKey = `${query.toLowerCase()}|${pg}|${size}`;
+  const hit = searchCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < GH_SEARCH_CACHE_TTL_MS) return hit.data;
+
+  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&per_page=${size}&page=${pg}`;
+  let data;
+  try {
+    const res = await fetch(url, { headers: ghHeaders(token) });
+    if (!res.ok) {
+      const hint = res.status === 403 || res.status === 429 ? '（可能触发 GitHub 搜索限流，请稍后再试或配置 GH_TOKEN）' : '';
+      throw new Error(`GitHub 搜索 API HTTP ${res.status}${hint}`);
+    }
+    const body = await res.json();
+    data = {
+      q: query,
+      total: body.total_count || 0,
+      page: pg,
+      perPage: size,
+      incomplete: Boolean(body.incomplete_results),
+      items: Array.isArray(body.items) ? body.items.map(mapRepo) : [],
+      error: '',
+    };
+  } catch (e) {
+    // 失败只短缓存 30 秒，避免持续打死限流的接口
+    data = { q: query, total: 0, page: pg, perPage: size, incomplete: false, items: [], error: e.message };
+    searchCache.set(cacheKey, { data, at: Date.now() - GH_SEARCH_CACHE_TTL_MS + 30 * 1000 });
+    return data;
+  }
+  searchCache.set(cacheKey, { data, at: Date.now() });
+  return data;
 }
 
 // 对外统一入口

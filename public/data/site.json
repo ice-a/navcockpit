@@ -1,0 +1,32 @@
+{
+  "site": {
+    "name": "渡口",
+    "en": "Ferry",
+    "mark": "渡",
+    "tagline": "从这里去别处",
+    "description": "常用站点、工具与文章，从这里出发。",
+    "author": "爱喝水的木子"
+  },
+  "tabs": [
+    { "id": "library", "label": "资源库", "icon": "apps" }
+  ],
+  "defaultTab": "library",
+  "social": [
+    { "icon": "github", "label": "GitHub · ice-a", "url": "https://github.com/ice-a" }
+  ],
+  "hitokoto": {
+    "enabled": true,
+    "endpoint": "https://v1.hitokoto.cn/?c=d&c=i&encode=json"
+  },
+  "footer": {
+    "links": [
+      { "label": "博客", "url": "https://104303.xyz" },
+      { "label": "GitHub", "url": "https://github.com/ice-a" }
+    ]
+  },
+  "analytics": {
+    "gaId": "",
+    "clarityId": "",
+    "adsenseClient": ""
+  }
+}

@@ -1,80 +1,119 @@
-# 领航舱 NavCockpit（原「导航台」/ dns-dashboard，Nuxt 3 前后端一体）
+# 渡口 Ferry
 
-Vue 3 + Nuxt 3 单体应用：前端页面与 server/api 路由（Nitro）在同一个项目里，**前后端不分离**。
-集成五大板块，全部来自你指定的开源项目：
+从这里去别处。纯静态的资源库，**站点导航 + AI 资源 + 站内文章**合成一棵树。
+Vite + Vue 3 构建，没有任何服务端；内容全部读 `public/data/` 下的 JSON，改数据不用改代码。
 
-| 板块 | 数据来源 | 说明 |
-| --- | --- | --- |
-| 🌐 Cloudflare DNS | 原项目 | 自动读取 CF 托管网域的 DNS 记录 + 探活 |
-| 🧭 网站导航 | [ice-a/nav_devops](https://github.com/ice-a/nav_devops) | 424 条链接（去重），55 个分类归为 9 个大类，支持二次细分 + 搜索 |
-| 🔥 热榜 | [ice-a/newsnow](https://github.com/ice-a/newsnow) | 服务端抓取：知乎/微博/百度/B站/GitHub/HN/V2EX/掘金/Product Hunt，带缓存 |
-| 🤖 AI 资源台 | [ice-a/forword-api-record](https://github.com/ice-a/forword-api-record) | 中转站/工具/Skills/VPN/服务器/教程，**存远程 MongoDB**，管理密码鉴权 |
-| 📝 文章转 MD | [ice-a/html_to_markdown_by_ai](https://github.com/ice-a/html_to_markdown_by_ai) | 服务端抓正文 + 图片转存图床 + Turndown + AI 总结 |
-| 🎨 丑头像 | [GordenSun/uglyAvatar](https://github.com/GordenSun/uglyAvatar) | Canvas 引擎、seed 可复现、4 种物种、1024px PNG 导出 |
-| 📦 GitHub | 原项目 | 拉取用户的**全部公开仓库**，按最近推送时间排序（`/api/github/repos`）；另有 **GitHub 全站仓库搜索**（`/api/github/search`），页内可切换「当前用户 / GitHub 全站」两种搜索 |
+- 前端：Vue 3（Composition API）+ 原生 CSS 设计令牌，无组件库，浅色/深色双主题
+- 数据：`public/data/library.json`（目录）+ `articles.json`（文章正文，点开才加载）
+- 部署：`dist/` 直接丢 Cloudflare Pages
 
-另有：Google AdSense 广告位、Google Analytics 4、Microsoft Clarity（Bing 家族分析）、Bing UET 统计。
+## 目录
 
-## 运行
-
-```bash
-npm install
-copy .env.example .env   # 填入 CF_API_TOKEN、MONGODB_URI 等
-npm run dev              # http://localhost:3000
+```
+navcockpit
+├─ index.html               入口
+├─ vite.config.js           构建配置（outDir: dist）
+├─ public/
+│  ├─ _headers              Cloudflare Pages 缓存与安全头
+│  └─ data/                 站点的全部内容，见下节
+├─ src/
+│  ├─ main.js               挂载、首屏前落主题
+│  ├─ App.vue               外壳：顶栏品牌、内容区、快捷键
+│  ├─ lib/store.js          设置持久化 + JSON 加载缓存 + 统计脚本注入
+│  ├─ lib/format.js         首字母/配色/域名/日期等小工具
+│  ├─ styles/base.css       设计令牌与所有样式
+│  └─ components/           LibraryView / LinkCard / TutorialReader / 命令面板 / 设置抽屉 …
+├─ scripts/
+│  ├─ build-data.mjs        data-export → library.json + articles.json（合并逻辑在这里）
+│  ├─ export-mongo.mjs      从 MongoDB 导出原始集合到 data-export/（一次性迁移用）
+│  └─ export-tech-docs.mjs  资源库里的技术类内容 → less_is_more_cn 文档站
+└─ data-export/             从 Mongo 导出的原始 JSON（已剔除 apiKey，可不入库）
 ```
 
-## 部署
+## JSON 数据（改内容只需动这里）
 
-推荐 **Vercel**（Node runtime，mongoose 可直连远程 MongoDB，与 forword-api-record 相同路线）：
+| 文件 | 作用 |
+| --- | --- |
+| `public/data/site.json` | 站点名/英文名/品牌字、顶部板块 `tabs`、顶栏社交入口 `social`、一言接口 `hitokoto`、页脚链接、统计 ID |
+| `public/data/library.json` | 资源库：`sections[].categories[].items[]`，条目 `kind` 为 `link`（外链）或 `article`（站内文章） |
+| `public/data/articles.json` | 文章正文（Markdown 字符串，前端用 marked 渲染），按 `id` 与目录里的 `articleId` 对应 |
 
-```bash
-npm i -g vercel
-vercel        # 首次按引导创建项目
+`site.json` 里的 `tabs` 只有一条时顶栏不显示板块切换，加第二条即自动出现：
+
+```json
+"tabs": [
+  { "id": "library", "label": "资源库", "icon": "apps" }
+]
 ```
 
-在 Vercel 项目 Settings → Environment Variables 里配置 `.env` 中的所有变量后重新部署。
-Nitro 会自动适配 Vercel（无需额外 preset）。也可部署到 Cloudflare Pages，但注意：
-CF Workers 运行时不支持 mongoose 的 TCP 长连接，若部署 CF 需把 AI 资源台的存储换掉或用 Node preset 的自托管。
+顶栏图标入口（GitHub 等）由 `social` 提供，`icon` 取 `src/components/Icon.vue` 里的图标名：
 
-## 数据与安全
+```json
+"social": [
+  { "icon": "github", "label": "GitHub · ice-a", "url": "https://github.com/ice-a" }
+]
+```
 
-- **远程 MongoDB**：`MONGODB_URI` 只存在于服务端环境变量，浏览器永远不接触连接串；AI 资源台 7 个集合（stations/tools/skills/vpns/servers/tutorials/globalais）。
-- **API Key 保管**：中转站的 apiKey 明文存 MongoDB，但接口返回前统一脱敏（`sanitizeStation`），前端永远拿不到。
-- **管理鉴权**：写操作校验 `x-admin-password` 请求头（服务端比对 `ADMIN_PASSWORD`）；前端密码存 sessionStorage。
-- **探活/模型拉取/AI 调用**：全部由服务端代理，规避浏览器 CORS，Key 不出服务端。
+这些图标在 720px 以下的窄屏会隐藏（页脚仍有同样链接），避免挤压顶栏。
 
-## 广告与分析配置
+顶栏中间那句一言来自开源的 [hitokoto](https://hitokoto.cn) 接口，点击可换一句：
 
-在 `.env` / Vercel 环境变量里填以下值即自动注入（留空完全不加载脚本）：
+```json
+"hitokoto": {
+  "enabled": true,
+  "endpoint": "https://v1.hitokoto.cn/?c=d&c=i&encode=json"
+}
+```
 
-| 变量 | 用途 | 示例 |
-| --- | --- | --- |
-| `NUXT_PUBLIC_GA_ID` | Google Analytics 4 | `G-XXXXXXXXXX` |
-| `NUXT_PUBLIC_ADSENSE_CLIENT` | Google AdSense（导航页有广告位） | `ca-pub-XXXXXXXXXXXXXXXX` |
-| `NUXT_PUBLIC_CLARITY_ID` | Microsoft Clarity 行为分析 | 32 位 hex |
-| `NUXT_PUBLIC_BING_UET_ID` | Bing UET 统计 | `12345678` |
+`enabled: false` 即关闭；`c` 是分类（`d` 文学、`i` 诗词），接口不可用时这块直接不显示。
 
-AdSense 广告单元 ID 需在 `components/AdSlot.vue` 使用处传 `slot-id`。
+每张资源卡右上角有一个分享图标：鼠标移入或键盘聚焦时露出，点击优先调系统分享面板，桌面端则把该条链接复制到剪贴板并短暂显示对勾（文章卡片分享的是站点地址）。触摸设备上按钮半透明常驻。
 
-## 已知限制（原"纯前端"要求下无法实现、改 Nuxt 后已解决的对照）
+## 命令
 
-- ~~浏览器无法直连 MongoDB~~ → 改为 Nitro 服务端 mongoose 连接 ✅
-- ~~热榜源被 CORS/风控拦截~~ → 服务端抓取 ✅（微博仍需 `WEIBO_COOKIE`；抖音/雪球/酷安等带强签名的源未移植）
-- ~~HTML 抓取 CORS 限制~~ → 服务端抓取 + 图床转存 ✅
-- AI 总结需要 Key：页面现填（存 localStorage，仅随请求发送）或服务端配置 `GLOBAL_AI_*`
-- Vercel Cron 定时测活未实现，探活为打开页面时手动/自动触发
+```bash
+pnpm install
+pnpm dev            # 本地开发
+pnpm build          # 构建到 dist/
+pnpm preview        # 预览构建结果
 
-## 网站导航：分类后台（新增 / 改名 / 删除 / 排序）
+pnpm data:build     # 由 data-export/ 重新生成 library.json 与 articles.json
+pnpm data:docs      # 把技术类内容同步到 less_is_more_cn 文档站
+```
 
-网站导航的分类与链接已迁到 MongoDB（集合 `NavCategory` / `NavLink`），可在后台管理：
+## 部署到 Cloudflare Pages
 
-- **数据初始化**：进入「网站导航」→ 点右上角「进入管理」（密码为 `ADMIN_PASSWORD`）→「导入 link.json」，
-  一键把原 `public/link.json` 的 55 个分类、424 条链接（按 url+name 去重）迁入库（幂等，可重复执行）。
-- **新增分类**：后台「＋ 分类」填写展示名 / 所属大类 / 图标 / 排序。
-- **改名分类**：后台「管理分类」→「改名」，仅改展示名，`key` 不变，链接仍按 `key` 关联不会断链。
-- **删除分类**：删除后其下链接归入「未分类」。
-- **链接管理**：后台「＋ 链接」可新增；每张卡片右上「编辑 / 删」可改归属分类、描述等。
+| 项 | 值 |
+| --- | --- |
+| 构建命令 | `pnpm build` |
+| 输出目录 | `dist` |
+| 环境变量 | 无（统计 ID 写在 `site.json` 里） |
 
-接口：`GET/POST /api/nav/categories`、`PUT/DELETE /api/nav/categories/:key`、
-`GET/POST /api/nav/links`、`PUT/DELETE /api/nav/links/:id`、`POST /api/nav/seed`。
-写操作均复用 `x-admin-password` 鉴权（与 AI 资源台同一套 `ADMIN_PASSWORD`）。
+`public/_headers` 已配置：`/data/*` 缓存 5 分钟、`/assets/*` 长缓存，其余带 `nosniff`。
+
+## 数据结构与合并规则
+
+`scripts/build-data.mjs` 把 Mongo 导出的多个集合合成一棵树：
+
+- **导航**：`navcategories` 提供「大类 → 分类」，`navlinks` 按 `catelog` 落到分类；没有对应分类的链接进「其他」。
+- **AI 资源**：`stations / tools / skills / vpns / servers` 通过 `HUB_MERGE` 映射并入大类，
+  例如中转站 → `AI 工具/中转站`、Skills → `AI 工具/Skills`、VPN 与 VPS → `代理防护`、
+  港卡币卡与 AI 会员 → `商业推广`；其余板块（如 hubitems 里的自定义板块）进「其他」。
+- **教程**：`tutorials`（`status: published`）作为 `kind: article` 条目并入 `学习提升/教程`，
+  正文单独写进 `articles.json`，列表页只带 `articleId`，点开才加载。
+- **去重**：外链按 `url + name`，文章按标题；中转站的 `apiKey` / `keyId` 一律不导出。
+
+旧 Nuxt 代码与旧配置放在 `.legacy/`（未纳入构建，也没有 git 历史，确认无用后可整目录删掉）。
+`.nuxt/`、`.output/` 是旧构建残留，同样可以删除。
+
+## 技术内容去了哪
+
+资源库里 AI 工具 / 开发工具 / 采集自动化 / 逆向安全 / 学习提升 五个大类由 `pnpm data:docs`
+生成到 `../less_is_more_cn/docs/07技术资源/`（VitePress 文档站，按分类成表格）。
+数据以 `library.json` 为准，改完重跑一次即可同步。
+
+## 已知限制
+
+- 纯静态，没有后台管理与账号体系；改内容 = 改 JSON 再构建。
+- 资源规模约 500 条，全部在一份 JSON 里，首屏一次拉完；文章正文按需另外加载。
+- 站内文章没有目录锚点与全文检索，长文靠浏览器内查找。

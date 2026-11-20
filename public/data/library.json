@@ -3367,7 +3367,7 @@
   {
    "id": "资源社区",
    "name": "资源社区",
-   "count": 51,
+   "count": 47,
    "categories": [
     {
      "id": "影视",
@@ -3512,37 +3512,13 @@
     {
      "id": "个人站",
      "name": "个人站",
-     "count": 8,
+     "count": 4,
      "items": [
-      {
-       "kind": "link",
-       "name": "爬虫题库",
-       "url": "https://tiku.020417.xyz",
-       "desc": "爬虫题库"
-      },
-      {
-       "kind": "link",
-       "name": "CTF工具",
-       "url": "https://ctf.020417.xyz/",
-       "desc": "tools"
-      },
       {
        "kind": "link",
        "name": "域名探测",
        "url": "https://web.020417.xyz/",
        "desc": "域名探测"
-      },
-      {
-       "kind": "link",
-       "name": "实时新闻",
-       "url": "https://new.020417.xyz/",
-       "desc": "实时新闻"
-      },
-      {
-       "kind": "link",
-       "name": "微信公众号文章排版",
-       "url": "https://md.020417.xyz/",
-       "desc": "微信公众号文章排版"
       },
       {
        "kind": "link",
@@ -3559,8 +3535,8 @@
       {
        "kind": "link",
        "name": "blog",
-       "url": "https://lideshan.cn",
-       "desc": "blog"
+       "url": "https://ice-a.github.io/less_is_more_cn/",
+       "desc": "个人博客"
       }
      ]
     },
